@@ -59,6 +59,7 @@ export async function resolveMapsLink(value: string): Promise<MapsResult | null>
     return null;
   }
 
+  let stage = "Google Maps redirect";
   try {
     const page = await loadMapsPage(start);
     if (!page) {
@@ -70,7 +71,14 @@ export async function resolveMapsLink(value: string): Promise<MapsResult | null>
     let address: string | undefined;
     let addressApproximate = false;
 
-    const preview = await loadPreview(page.html);
+    stage = "Google Maps place data";
+    let preview: PreviewData | null = null;
+    try {
+      preview = await loadPreview(page.html);
+    } catch (error) {
+      console.error("Maps place data request failed:", errorName(error));
+    }
+
     if (preview) {
       name = preview.name ?? name;
       address = preview.address;
@@ -82,10 +90,15 @@ export async function resolveMapsLink(value: string): Promise<MapsResult | null>
     }
 
     if (!address) {
-      const fallback = await reverseGeocode(coordinates);
-      if (fallback) {
-        address = fallback;
-        addressApproximate = true;
+      stage = "OpenStreetMap reverse geocoding";
+      try {
+        const fallback = await reverseGeocode(coordinates);
+        if (fallback) {
+          address = fallback;
+          addressApproximate = true;
+        }
+      } catch (error) {
+        console.error("Maps reverse geocoding failed:", errorName(error));
       }
     }
 
@@ -95,7 +108,8 @@ export async function resolveMapsLink(value: string): Promise<MapsResult | null>
       addressApproximate: addressApproximate || undefined,
       coordinates,
     };
-  } catch {
+  } catch (error) {
+    console.error("Maps lookup failed during", stage, errorName(error));
     return null;
   }
 }
@@ -241,15 +255,21 @@ async function loadMapsPage(start: URL): Promise<MapsPage | null> {
       return null;
     }
 
-    const response = await fetch(current.toString(), {
-      redirect: "manual",
-      headers: {
-        "user-agent": USER_AGENT,
-        "accept-language": "id-ID,id;q=0.9,en;q=0.8",
-        accept: "text/html,application/xhtml+xml",
-      },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
+    let response: Response;
+    try {
+      response = await fetch(current.toString(), {
+        redirect: "manual",
+        headers: {
+          "user-agent": USER_AGENT,
+          "accept-language": "id-ID,id;q=0.9,en;q=0.8",
+          accept: "text/html,application/xhtml+xml",
+        },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+    } catch (error) {
+      console.error("Google Maps page request failed:", errorName(error));
+      return isSupportedMapsUrl(current) ? { url: current, html: "" } : null;
+    }
 
     if (REDIRECT_STATUSES.has(response.status)) {
       const location = response.headers.get("location");
@@ -261,7 +281,8 @@ async function loadMapsPage(start: URL): Promise<MapsPage | null> {
     }
 
     if (!response.ok) {
-      return null;
+      console.error("Google Maps page returned HTTP", response.status);
+      return { url: current, html: "" };
     }
 
     const finalUrl = response.url ? new URL(response.url) : current;
@@ -269,7 +290,14 @@ async function loadMapsPage(start: URL): Promise<MapsPage | null> {
       return null;
     }
 
-    return { url: finalUrl, html: await response.text() };
+    let html = "";
+    try {
+      html = await response.text();
+    } catch (error) {
+      console.error("Google Maps page body failed:", errorName(error));
+    }
+
+    return { url: finalUrl, html };
   }
 
   return null;
@@ -277,8 +305,9 @@ async function loadMapsPage(start: URL): Promise<MapsPage | null> {
 
 async function loadPreview(html: string): Promise<PreviewData | null> {
   const match =
-    /href="((?:https:\/\/www\.google\.com)?\/maps\/preview\/place\?[^"]+)"/.exec(html);
+    /href="((?:https:\/\/www\.google\.com)?\/maps\/preview\/place\?[^\"]+)"/.exec(html);
   if (!match) {
+    console.error("Google Maps place data link not found");
     return null;
   }
 
@@ -429,6 +458,10 @@ function toCoordinates(latitude: unknown, longitude: unknown): Coordinates | und
   }
 
   return { latitude, longitude };
+}
+
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : "unknown error";
 }
 
 function cleanText(value: string): string {

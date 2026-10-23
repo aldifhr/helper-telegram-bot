@@ -204,6 +204,27 @@ describe("resolveMapsLink", () => {
     expect(result?.coordinates).toEqual({ latitude: -7.2810178, longitude: 108.7039185 });
   });
 
+  it("uses reverse geocoding when Google blocks the place page", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    stubFetch((url) => {
+      if (url === SHORT_URL) {
+        return new Response(null, { status: 302, headers: { location: FINAL_URL } });
+      }
+      if (url === FINAL_URL) {
+        return new Response("blocked", { status: 403 });
+      }
+      if (url.startsWith("https://nominatim.openstreetmap.org/reverse")) {
+        return new Response(JSON.stringify({ display_name: "Cilacap, Jawa Tengah, Indonesia" }));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    const result = await resolveMapsLink(SHORT_URL);
+
+    expect(result?.addressApproximate).toBe(true);
+    expect(result?.coordinates).toEqual({ latitude: -7.2810178, longitude: 108.7039185 });
+  });
+
   it("does not fetch unsupported URLs", async () => {
     const fetchMock = stubFetch(() => new Response("unexpected"));
 
