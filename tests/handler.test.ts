@@ -139,6 +139,12 @@ describe("message handling", () => {
     expect(sentPayload(fetchMock).text).toBe("-7.123456 109.123456");
   });
 
+  it("converts Indonesian decimal-comma coordinates to decimal points", async () => {
+    const fetchMock = stubTelegramFetch();
+    await sendUpdate(textUpdate("-7,3449461, 108,7079663"));
+    expect(sentPayload(fetchMock).text).toBe("-7.3449461 108.7079663");
+  });
+
   it("handles /clean with inline text", async () => {
     const fetchMock = stubTelegramFetch();
     await sendUpdate(textUpdate("/clean Jl. Sudirman No. 12, Cilacap, Jawa Tengah"));
@@ -324,6 +330,32 @@ describe("map link handling", () => {
     expect(telegramPayload(fetchMock).reply_markup).toEqual({
       inline_keyboard: [[{ text: "Salin alamat", copy_text: { text: address.replaceAll(",", "") } }]],
     });
+  });
+
+  it("replies with a rate-limit message without retrying HTTP 429", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === shortUrl) {
+        return new Response("rate limited", {
+          status: 429,
+          headers: { "retry-after": "60" },
+        });
+      }
+      if (url.includes("api.telegram.org")) {
+        return new Response(JSON.stringify({ ok: true, result: { message_id: 99 } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await sendUpdate(textUpdate(shortUrl));
+
+    expect(response.status).toBe(200);
+    expect(telegramText(fetchMock)).toContain("HTTP 429");
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === shortUrl)).toHaveLength(1);
   });
 
   it("replies with an error when the map link cannot be read", async () => {

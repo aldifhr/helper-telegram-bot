@@ -207,12 +207,12 @@ https://www.google.co.id/maps/...
 
 Cara kerja:
 
-1. Short link di-resolve maksimal 5 redirect.
-2. Koordinat diambil dari parameter `!3d`/`!4d`, `@lat,lng`, atau `q=lat,lng`.
-3. Nama dan alamat diambil dari data tempat halaman Google Maps.
-4. Jika data alamat Google tidak tersedia, bot menampilkan `Alamat: Tidak tersedia` dan tetap membalas koordinat yang berhasil dibaca.
-5. Koma dihapus dari nama dan alamat sebelum dibalas.
-6. Balasan alamat menyertakan tombol `Salin alamat` yang menyalin alamat ke clipboard jika panjangnya maksimal 256 karakter.
+1. Koordinat dicoba dari URL yang diterima sebelum melakukan request.
+2. Jika short link perlu di-resolve, redirect diikuti maksimal 5 kali. Jika URL redirect sudah memuat koordinat, resolver berhenti tanpa mengunduh halaman Google Maps.
+3. HTML halaman Maps hanya diunduh jika redirect tidak memberikan koordinat; ukuran HTML dibatasi 64 KiB dan lookup keseluruhan 20 detik.
+4. Nama dan alamat diambil dari data tempat Google Maps hanya jika perlu.
+5. Jika Google membalas HTTP 429, bot tidak retry dan membalas pesan rate-limit; bila koordinat sudah tersedia, bot tetap mengirim koordinat.
+6. Balasan alamat menyertakan tombol `Salin alamat` jika alamat tersedia dan panjangnya maksimal 256 karakter.
 
 Catatan penting:
 
@@ -225,6 +225,7 @@ Catatan penting:
 ## Perilaku dan Batas
 
 - Batas aman input adalah 4096 karakter (batas teks pesan Telegram). Pesan yang lebih panjang mendapat balasan bahwa pesan terlalu panjang.
+- Pasangan koordinat dengan koma desimal, seperti `-7,3449461, 108,7079663`, dinormalisasi menjadi `-7.3449461 108.7079663`.
 - Jika pesan berisi link Google Maps, fitur Maps diproses dan teks lain dalam pesan yang sama diabaikan.
 - Jika teks tidak memiliki koma, bot membalas bahwa tidak ada koma dan teks tidak berubah.
 - Jika hasil kosong (misalnya hanya koma), bot memberi tahu bahwa tidak ada teks tersisa.
@@ -235,9 +236,9 @@ Catatan penting:
 
 - Endpoint hanya menerima `POST /webhook` dengan header `X-Telegram-Bot-Api-Secret-Token` yang cocok. Perbandingan dilakukan secara constant-time.
 - Payload update divalidasi sebelum diproses.
-- Fetch untuk fitur Maps hanya diizinkan ke host Google Maps, dengan batas redirect dan timeout 8 detik per request.
+- Fetch untuk fitur Maps hanya diizinkan ke HTTPS host Google Maps, maksimal 5 redirect, 8 detik per request, dan 20 detik per lookup.
 - Bot token dan webhook secret hanya disimpan sebagai Worker Secrets.
-- Isi pesan pengguna tidak dicatat ke log. Log hanya berisi status/error dari Telegram API.
+- Isi pesan, URL lengkap, query, token, dan alamat tidak dicatat. Log Maps hanya memuat stage, hostname, status, content type, hostname tujuan redirect, dan `Retry-After`.
 - Jangan pernah menulis token ke source code, dokumentasi, tangkapan layar, atau commit Git.
 - Jika token bocor, buat token baru melalui `/revoke` di BotFather, perbarui secret, lalu daftarkan ulang webhook.
 
@@ -261,4 +262,5 @@ Catatan penting:
 - **Bot diam di grup**: periksa privacy mode BotFather atau gunakan `/clean@NamaBot <teks>`.
 - **Webhook terdaftar tetapi salah URL**: jalankan ulang `setWebhook` dengan URL yang benar.
 - **Link Maps gagal diproses**: pastikan link publik dan mengarah ke tempat/titik, bukan link yang membutuhkan login. Coba buka link di browser; jika Google menampilkan captcha/consent, Worker juga tidak dapat membacanya.
+- **HTTP 429 pada link Maps**: `npx wrangler tail helper-telegram-bot` menunjukkan stage dan hostname yang membatasi request (`maps_short_link_redirect`, `google_maps_redirect`, atau `google_place_data`), beserta `retryAfter`. Bot tidak retry. Jika redirect URL memuat koordinat, bot membalas koordinat tanpa request halaman penuh.
 - **Alamat tidak tersedia**: Google Maps tidak mengirim data alamat untuk link tersebut. Bot tetap mengirim nama tempat dan koordinat jika tersedia.

@@ -4,8 +4,6 @@ const MAX_LOOKUP_MS = 20_000;
 const MAX_REDIRECTS = 5;
 const MAX_HTML_BYTES = 64 * 1024;
 const MAX_PREVIEW_BYTES = 256 * 1024;
-const USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const URL_PATTERN = /https?:\/\/[^\s<>"'`]+/gi;
 const TRAILING_PUNCTUATION = /[)\].,!?;:]+$/;
@@ -274,7 +272,6 @@ async function loadMapsPage(start: URL, deadline: number): Promise<MapsPage | nu
       response = await fetch(current.toString(), {
         redirect: "manual",
         headers: {
-          "user-agent": USER_AGENT,
           "accept-language": "id-ID,id;q=0.9,en;q=0.8",
           accept: "text/html,application/xhtml+xml",
         },
@@ -357,7 +354,6 @@ async function loadPreview(html: string, deadline: number): Promise<PreviewResul
   try {
     response = await fetch(url.toString(), {
       headers: {
-        "user-agent": USER_AGENT,
         "accept-language": "id-ID,id;q=0.9,en;q=0.8",
         accept: "application/json,text/plain,*/*",
       },
@@ -400,9 +396,9 @@ function logResponse(
       stage,
       hostname,
       status: response.status,
-      contentType: response.headers.get("content-type") ?? undefined,
-      redirectHostname,
-      retryAfter: response.headers.get("retry-after") ?? undefined,
+      contentType: response.headers.get("content-type"),
+      redirectHostname: redirectHostname ?? null,
+      retryAfter: response.headers.get("retry-after"),
     }),
   );
 }
@@ -412,8 +408,11 @@ function logNetworkFailure(stage: string, error: unknown, hostname?: string): vo
     "Maps outbound request",
     JSON.stringify({
       stage,
-      hostname,
+      hostname: hostname ?? null,
       status: "network_error",
+      contentType: null,
+      redirectHostname: null,
+      retryAfter: null,
       errorType: errorName(error),
     }),
   );
