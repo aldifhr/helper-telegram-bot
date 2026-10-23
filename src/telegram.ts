@@ -3,9 +3,16 @@ import type { Env, TelegramApiResponse } from "./types";
 const TELEGRAM_API_BASE = "https://api.telegram.org";
 const REQUEST_TIMEOUT_MS = 10_000;
 
+interface CopyTextButton {
+  label: string;
+  text: string;
+}
+
 interface SendMessageOptions {
   replyToMessageId?: number;
   copyText?: string;
+  copyTextLabel?: string;
+  copyTextButtons?: CopyTextButton[];
 }
 
 export async function sendMessage(
@@ -27,10 +34,16 @@ export async function sendMessage(
     };
   }
 
-  if (options.copyText && options.copyText.length <= 256) {
+  const copyButtons = (options.copyTextButtons ?? [])
+    .filter((button) => button.text.length > 0 && button.text.length <= 256)
+    .map((button) => ({ text: button.label, copy_text: { text: button.text } }));
+
+  if (copyButtons.length > 0) {
+    payload.reply_markup = { inline_keyboard: [copyButtons] };
+  } else if (options.copyText && options.copyText.length <= 256) {
     payload.reply_markup = {
       inline_keyboard: [
-        [{ text: "Salin alamat", copy_text: { text: options.copyText } }],
+        [{ text: options.copyTextLabel ?? "Salin teks", copy_text: { text: options.copyText } }],
       ],
     };
   }

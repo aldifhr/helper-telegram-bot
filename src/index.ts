@@ -1,26 +1,40 @@
 ﻿import { extractMapsUrl, formatMapsResult, resolveMapsLink } from "./maps";
-import { MAX_INPUT_LENGTH, removeCommas } from "./processor";
+import { MAX_INPUT_LENGTH, parseCoordinatePair, removeCommas } from "./processor";
 import { sendMessage } from "./telegram";
+import type { MapsResult } from "./maps";
 import type { Env, TelegramMessage, TelegramUpdate } from "./types";
 
 const WEBHOOK_PATH = "/webhook";
 const SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token";
 
 const START_TEXT = [
-  "Halo! Saya bot penghapus koma.",
+  "Halo! Saya bot pengolah teks dan lokasi.",
   "",
-  "Kirim teks apa saja dan saya akan menghapus semua tanda koma (,) tanpa mengubah karakter lainnya.",
-  "Kirim link Google Maps untuk melihat nama tempat, alamat tanpa koma, dan koordinat.",
+  "CARA PAKAI TEKS",
+  "Kirim teks biasa. Saya menghapus koma ASCII (,) dan membalas hasilnya agar mudah disalin.",
+  "Karakter lain seperti titik desimal, minus, spasi, huruf, dan emoji tetap dipertahankan.",
   "",
-  "Perintah:",
-  "/start - sambutan",
-  "/help - panduan penggunaan",
-  "/clean <teks> - hapus koma dari teks",
-  "",
-  "Contoh:",
-  "-7.123456, 109.123456",
+  "KOORDINAT",
+  "Koordinat desimal dengan koma juga dikenali:",
+  "-7,3449461, 108,7079663",
   "menjadi",
-  "-7.123456 109.123456",
+  "-7.3449461 108.7079663",
+  "Hasil koordinat menyediakan tombol salin latitude dan longitude secara terpisah.",
+  "",
+  "GOOGLE MAPS",
+  "Kirim link tempat atau pin Google Maps. Bot akan membalas nama, alamat jika tersedia, dan koordinat.",
+  "Koma pada alamat Maps dihapus agar hasil mudah ditempel ke formulir yang menolak koma.",
+  "Tombol salin tersedia terpisah untuk nama, alamat, latitude, dan longitude.",
+  "Alamat Places API memerlukan konfigurasi Google Places API; jika tidak tersedia, alamat bisa ditampilkan sebagai tidak tersedia.",
+  "",
+  "PERINTAH",
+  "/start - tampilkan panduan ini",
+  "/help - tampilkan panduan penggunaan",
+  "/clean <teks> - proses teks setelah perintah",
+  "Kirim /clean saja untuk melihat petunjuk singkat.",
+  "",
+  `Batas pesan: ${MAX_INPUT_LENGTH} karakter.`,
+  "Gunakan /help untuk panduan ringkas.",
 ].join("\n");
 
 const HELP_TEXT = [
@@ -31,8 +45,10 @@ const HELP_TEXT = [
   "   /clean Jakarta, Bandung, Surabaya",
   "3. Jika hanya mengirim /clean, bot akan meminta teks.",
   "",
-  "Yang dihapus hanya karakter koma ASCII (,).",
-  "Titik desimal, tanda minus, spasi, emoji, dan karakter lain tetap dipertahankan.",
+  "Pada teks biasa, koma ASCII (,) dihapus.",
+  "Dalam pasangan koordinat valid, koma desimal diganti titik dan koma pemisah menjadi spasi.",
+  "Koma pada alamat dari Google Maps dihapus; koma desimal koordinat diubah menjadi titik.",
+  "Tanda minus, titik desimal, spasi, emoji, dan karakter lain tetap dipertahankan.",
   "",
   "Link Google Maps:",
   "Kirim link tempat atau titik dari Google Maps, misalnya maps.app.goo.gl/...",
@@ -155,7 +171,7 @@ async function processMapsAndRespond(
   mapsUrl: string,
 ): Promise<Response> {
   try {
-    const resolution = await resolveMapsLink(mapsUrl);
+    const resolution = await resolveMapsLink(mapsUrl, env.GOOGLE_PLACES_API_KEY);
 
     if (resolution.status === "rate_limited") {
       const result = resolution.result;
@@ -164,8 +180,8 @@ async function processMapsAndRespond(
       }
 
       const text = `${formatMapsResult(result)}\n\nGoogle Maps membatasi permintaan (HTTP 429); alamat mungkin tidak tersedia.`;
-      const copyText = result.address && result.address.length <= 256 ? result.address : undefined;
-      return replyAndRespond(env, message, text, copyText);
+      const copy = mapsCopyOptions(result);
+      return replyAndRespond(env, message, text, undefined, undefined, copy.buttons);
     }
 
     if (resolution.status === "unavailable") {
@@ -173,8 +189,9 @@ async function processMapsAndRespond(
     }
 
     const result = resolution.result;
-    const copyText = result.address && result.address.length <= 256 ? result.address : undefined;
-    return replyAndRespond(env, message, formatMapsResult(result), copyText);
+    const text = formatMapsResult(result);
+    const copy = mapsCopyOptions(result);
+    return replyAndRespond(env, message, text, undefined, undefined, copy.buttons);
   } catch (error) {
     console.error("Google Maps resolution failed:", {
       errorType: error instanceof Error ? error.name : "unknown error",
@@ -186,6 +203,23 @@ async function processMapsAndRespond(
       "Google Maps sedang tidak bisa diproses. Coba kirim link lengkap atau koordinatnya secara langsung.",
     );
   }
+}
+
+function mapsCopyOptions(result: MapsResult): {
+  buttons: Array<{ label: string; text: string }>;
+} {
+  const buttons: Array<{ label: string; text: string }> = [];
+  if (result.name && result.name.length <= 256) {
+    buttons.push({ label: "Salin nama", text: result.name.replaceAll(",", "") });
+  }
+  if (result.address && result.address.length <= 256) {
+    buttons.push({ label: "Salin alamat", text: result.address.replaceAll(",", "") });
+  }
+  buttons.push(
+    { label: "Salin latitude", text: String(result.coordinates.latitude) },
+    { label: "Salin longitude", text: String(result.coordinates.longitude) },
+  );
+  return { buttons };
 }
 
 async function processAndRespond(
@@ -200,10 +234,20 @@ async function processAndRespond(
   }
 
   if (result === text) {
-    return replyAndRespond(env, message, NO_COMMAS);
+    const copyText = text.length <= 256 ? text : undefined;
+    return replyAndRespond(env, message, NO_COMMAS, copyText);
   }
 
-  return replyAndRespond(env, message, result);
+  const coordinates = parseCoordinatePair(result);
+  if (coordinates) {
+    return replyAndRespond(env, message, result, undefined, undefined, [
+      { label: "Salin latitude", text: coordinates.latitude },
+      { label: "Salin longitude", text: coordinates.longitude },
+    ]);
+  }
+
+  const copyText = result.length <= 256 ? result : undefined;
+  return replyAndRespond(env, message, result, copyText);
 }
 
 async function replyAndRespond(
@@ -211,10 +255,14 @@ async function replyAndRespond(
   message: TelegramMessage,
   text: string,
   copyText?: string,
+  copyTextLabel?: string,
+  copyTextButtons?: Array<{ label: string; text: string }>,
 ): Promise<Response> {
   const sent = await sendMessage(env, message.chat.id, text, {
     replyToMessageId: message.message_id,
     copyText,
+    copyTextLabel,
+    copyTextButtons,
   });
 
   if (!sent) {

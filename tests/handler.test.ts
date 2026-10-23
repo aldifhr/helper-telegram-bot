@@ -139,10 +139,18 @@ describe("message handling", () => {
     expect(sentPayload(fetchMock).text).toBe("-7.123456 109.123456");
   });
 
-  it("converts Indonesian decimal-comma coordinates to decimal points", async () => {
+  it("converts and adds a copy button for Indonesian decimal-comma coordinates", async () => {
     const fetchMock = stubTelegramFetch();
     await sendUpdate(textUpdate("-7,3449461, 108,7079663"));
-    expect(sentPayload(fetchMock).text).toBe("-7.3449461 108.7079663");
+    expect(sentPayload(fetchMock)).toMatchObject({
+      text: "-7.3449461 108.7079663",
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "Salin latitude", copy_text: { text: "-7.3449461" } },
+          { text: "Salin longitude", copy_text: { text: "108.7079663" } },
+        ]],
+      },
+    });
   });
 
   it("handles /clean with inline text", async () => {
@@ -166,7 +174,9 @@ describe("message handling", () => {
   it("shows help for /start and /help", async () => {
     const startFetch = stubTelegramFetch();
     await sendUpdate(textUpdate("/start"));
-    expect(String(sentPayload(startFetch).text)).toContain("penghapus koma");
+    expect(String(sentPayload(startFetch).text)).toContain("CARA PAKAI TEKS");
+    expect(String(sentPayload(startFetch).text)).toContain("-7,3449461, 108,7079663");
+    expect(String(sentPayload(startFetch).text)).toContain("GOOGLE MAPS");
     vi.unstubAllGlobals();
 
     const helpFetch = stubTelegramFetch();
@@ -328,8 +338,63 @@ describe("map link handling", () => {
     expect(text).toContain("Longitude: 108.7039185");
     expect(text).not.toContain(",");
     expect(telegramPayload(fetchMock).reply_markup).toEqual({
-      inline_keyboard: [[{ text: "Salin alamat", copy_text: { text: address.replaceAll(",", "") } }]],
+      inline_keyboard: [[
+        { text: "Salin nama", copy_text: { text: "Pondok Pesantren Al Anshor" } },
+        {
+          text: "Salin alamat",
+          copy_text: {
+            text: "Jl. Curug Bandung Ciheuleut Limbangan Kec. Wanareja Kabupaten Cilacap Jawa Tengah 53232",
+          },
+        },
+        { text: "Salin latitude", copy_text: { text: "-7.2810178" } },
+        { text: "Salin longitude", copy_text: { text: "108.7039185" } },
+      ]],
     });
+  });
+
+  it("uses the optional Places API binding for the map address", async () => {
+    const directUrl =
+      "https://www.google.com/maps/place/INSIMA+Sufyan+Tsauri/@-7.2936246,108.7394058,15z/data=!3d-7.2936246!4d108.7394058";
+    const placesAddress =
+      "Jl. Srikaya, Wanareja Timur, Wanareja, Kec. Wanareja, Kabupaten Cilacap, Jawa Tengah 53265, Indonesia";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "https://places.googleapis.com/v1/places:searchText") {
+        return new Response(
+          JSON.stringify({
+            places: [
+              {
+                formattedAddress: placesAddress,
+                location: { latitude: -7.2936246, longitude: 108.7394058 },
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("api.telegram.org")) {
+        return new Response(JSON.stringify({ ok: true, result: { message_id: 99 } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await sendUpdate(
+      textUpdate(directUrl),
+      { ...env, GOOGLE_PLACES_API_KEY: "test-places-key" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(telegramText(fetchMock)).toContain(
+      "Alamat: Jl. Srikaya Wanareja Timur Wanareja Kec. Wanareja Kabupaten Cilacap Jawa Tengah 53265 Indonesia",
+    );
+    const placesCall = fetchMock.mock.calls.find(([input]) =>
+      String(input).includes("places.googleapis.com"),
+    ) as unknown as [string, RequestInit];
+    expect(new Headers(placesCall[1].headers).get("X-Goog-Api-Key")).toBe("test-places-key");
   });
 
   it("replies with a rate-limit message without retrying HTTP 429", async () => {

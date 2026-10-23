@@ -1,5 +1,3 @@
-import { removeCommas } from "./processor";
-
 const MAX_LOOKUP_MS = 20_000;
 const MAX_REDIRECTS = 5;
 const MAX_HTML_BYTES = 64 * 1024;
@@ -56,7 +54,10 @@ export function extractMapsUrl(text: string): string | null {
   return null;
 }
 
-export async function resolveMapsLink(value: string): Promise<MapsResolution> {
+export async function resolveMapsLink(
+  value: string,
+  placesApiKey?: string,
+): Promise<MapsResolution> {
   let start: URL;
   try {
     start = new URL(value);
@@ -68,18 +69,19 @@ export async function resolveMapsLink(value: string): Promise<MapsResolution> {
     return { status: "unavailable" };
   }
 
+  const deadline = Date.now() + MAX_LOOKUP_MS;
   const directCoordinates = parseCoordinates(start);
   if (directCoordinates) {
-    return {
-      status: "ok",
-      result: {
-        name: cleanOptionalText(extractPlaceName(start)),
+    return resolvePlacesAddress(
+      {
+        name: trimOptionalText(extractPlaceName(start)),
         coordinates: directCoordinates,
       },
-    };
+      placesApiKey,
+      deadline,
+    );
   }
 
-  const deadline = Date.now() + MAX_LOOKUP_MS;
   let stage = "maps_redirect";
   try {
     const page = await loadMapsPage(start, deadline);
@@ -96,8 +98,12 @@ export async function resolveMapsLink(value: string): Promise<MapsResolution> {
       if (!coordinates) {
         return rateLimited ? { status: "rate_limited" } : { status: "unavailable" };
       }
-      const result = { name: cleanOptionalText(name), coordinates };
-      return rateLimited ? { status: "rate_limited", result } : { status: "ok", result };
+      return resolvePlacesAddress(
+        { name: trimOptionalText(name), coordinates },
+        placesApiKey,
+        deadline,
+        rateLimited,
+      );
     }
 
     stage = "google_place_data";
@@ -114,27 +120,126 @@ export async function resolveMapsLink(value: string): Promise<MapsResolution> {
       return rateLimited ? { status: "rate_limited" } : { status: "unavailable" };
     }
 
-    const result = {
-      name: cleanOptionalText(name),
-      address: address ? cleanText(address) : undefined,
-      coordinates,
-    };
-    return rateLimited ? { status: "rate_limited", result } : { status: "ok", result };
+    return resolvePlacesAddress(
+      {
+        name: trimOptionalText(name),
+        address: address ? address.replaceAll(",", "").trim() : undefined,
+        coordinates,
+      },
+      placesApiKey,
+      deadline,
+      rateLimited,
+    );
   } catch (error) {
     logNetworkFailure(stage, error);
     return { status: "unavailable" };
   }
 }
 
+async function resolvePlacesAddress(
+  result: MapsResult,
+  apiKey: string | undefined,
+  deadline: number,
+  previouslyRateLimited = false,
+): Promise<MapsResolution> {
+  const resultWithoutUnverifiedAddress = { ...result, address: undefined };
+  if (!apiKey || !result.name) {
+    return previouslyRateLimited
+      ? { status: "rate_limited", result }
+      : { status: "ok", result };
+  }
+
+  const url = "https://places.googleapis.com/v1/places:searchText";
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask": "places.id,places.location,places.formattedAddress",
+      },
+      body: JSON.stringify({
+        textQuery: result.name,
+        languageCode: "id",
+        maxResultCount: 5,
+        locationBias: {
+          circle: {
+            center: result.coordinates,
+            radius: 500,
+          },
+        },
+      }),
+      signal: timeoutSignal(deadline),
+    });
+  } catch (error) {
+    logNetworkFailure("google_places_text_search", error, "places.googleapis.com");
+    return previouslyRateLimited
+      ? { status: "rate_limited", result: resultWithoutUnverifiedAddress }
+      : { status: "ok", result: resultWithoutUnverifiedAddress };
+  }
+
+  logResponse("google_places_text_search", "places.googleapis.com", response);
+  if (!response.ok) {
+    await cancelBody(response);
+    return response.status === 429 || previouslyRateLimited
+      ? { status: "rate_limited", result: resultWithoutUnverifiedAddress }
+      : { status: "ok", result: resultWithoutUnverifiedAddress };
+  }
+
+  const data = (await response.json().catch(() => null)) as
+    | {
+        places?: Array<{
+          formattedAddress?: unknown;
+          location?: { latitude?: unknown; longitude?: unknown };
+        }>;
+      }
+    | null;
+  const places = Array.isArray(data?.places) ? data.places : [];
+  const match = places
+    .map((place) => {
+      const coordinates = toCoordinates(place.location?.latitude, place.location?.longitude);
+      return {
+        address: typeof place.formattedAddress === "string" ? place.formattedAddress : undefined,
+        distance: coordinates ? distanceMeters(result.coordinates, coordinates) : Infinity,
+      };
+    })
+    .filter((place) => place.address && place.distance <= 500)
+    .sort((left, right) => left.distance - right.distance)[0];
+
+  if (match?.address) {
+    return {
+      status: "ok",
+      result: { ...result, address: match.address.replaceAll(",", "").trim() },
+    };
+  }
+
+  return previouslyRateLimited
+    ? { status: "rate_limited", result: resultWithoutUnverifiedAddress }
+    : { status: "ok", result: resultWithoutUnverifiedAddress };
+}
+
+function distanceMeters(a: Coordinates, b: Coordinates): number {
+  const radians = (degrees: number) => (degrees * Math.PI) / 180;
+  const latitudeDelta = radians(b.latitude - a.latitude);
+  const longitudeDelta = radians(b.longitude - a.longitude);
+  const value =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(radians(a.latitude)) *
+      Math.cos(radians(b.latitude)) *
+      Math.sin(longitudeDelta / 2) ** 2;
+  return 6_371_000 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+}
+
 export function formatMapsResult(result: MapsResult): string {
   const lines: string[] = [];
 
   if (result.name) {
-    lines.push(`Nama: ${cleanText(result.name)}`);
+    lines.push(`Nama: ${result.name.replaceAll(",", "").trim()}`);
   }
 
   if (result.address) {
-    lines.push(`Alamat: ${cleanText(result.address)}`);
+    lines.push(`Alamat: ${result.address.replaceAll(",", "").trim()}`);
   } else {
     lines.push("Alamat: Tidak tersedia");
   }
@@ -477,8 +582,8 @@ async function readTextLimited(response: Response, maxBytes: number): Promise<st
   return new TextDecoder().decode(bytes);
 }
 
-function cleanOptionalText(value: string | undefined): string | undefined {
-  return value ? cleanText(value) : undefined;
+function trimOptionalText(value: string | undefined): string | undefined {
+  return value?.trim() || undefined;
 }
 
 function findAddress(data: unknown, name?: string): string | undefined {
@@ -576,8 +681,4 @@ function toCoordinates(latitude: unknown, longitude: unknown): Coordinates | und
 
 function errorName(error: unknown): string {
   return error instanceof Error ? error.name : "unknown error";
-}
-
-function cleanText(value: string): string {
-  return removeCommas(value).replace(/\s+/g, " ").trim();
 }

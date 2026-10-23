@@ -15,7 +15,6 @@ const ADDRESS =
   "Jl. Curug Bandung, Ciheuleut, Limbangan, Kec. Wanareja, Kabupaten Cilacap, Jawa Tengah 53232";
 const CLEAN_ADDRESS =
   "Jl. Curug Bandung Ciheuleut Limbangan Kec. Wanareja Kabupaten Cilacap Jawa Tengah 53232";
-
 function previewPayload(): string {
   const root: unknown[] = [];
   root[9] = [null, null, -7.2810178, 108.7039185];
@@ -114,7 +113,7 @@ describe("parseMapsPreview", () => {
 });
 
 describe("formatMapsResult", () => {
-  it("removes commas and shows coordinates", () => {
+  it("removes commas from Maps address and shows coordinates", () => {
     const text = formatMapsResult({
       name: "Pondok Pesantren Al Anshor",
       address: ADDRESS,
@@ -129,6 +128,7 @@ describe("formatMapsResult", () => {
         "Longitude: 108.7039185",
       ].join("\n"),
     );
+    expect(text).toContain(CLEAN_ADDRESS);
     expect(text).not.toContain(",");
   });
 
@@ -281,7 +281,7 @@ describe("resolveMapsLink", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("returns coordinates directly from a full Maps URL without fetching", async () => {
+  it("returns coordinates directly from a full Maps URL without a Places key", async () => {
     const fetchMock = stubFetch(() => new Response("unexpected"));
 
     expect(await resolveMapsLink(FINAL_URL)).toEqual({
@@ -292,6 +292,116 @@ describe("resolveMapsLink", () => {
       },
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("uses Places Text Search and selects the nearest address", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          places: [
+            {
+              id: "nearby-place",
+              formattedAddress: ADDRESS,
+              location: { latitude: -7.2811, longitude: 108.704 },
+            },
+            {
+              id: "far-place",
+              formattedAddress: "Wrong place",
+              location: { latitude: -7.3, longitude: 108.75 },
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const diagnostics = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const resolution = await resolveMapsLink(FINAL_URL, "test-places-key");
+
+    expect(resolution.status).toBe("ok");
+    if (resolution.status === "ok") {
+      expect(resolution.result.address).toBe(CLEAN_ADDRESS);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [requestUrl, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(requestUrl).toBe("https://places.googleapis.com/v1/places:searchText");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("X-Goog-Api-Key")).toBe("test-places-key");
+    expect(new Headers(init.headers).get("X-Goog-FieldMask")).toBe(
+      "places.id,places.location,places.formattedAddress",
+    );
+    expect(JSON.parse(String(init.body)).textQuery).toBe("Pondok Pesantren Al Anshor");
+    expect(JSON.stringify(diagnostics.mock.calls)).not.toContain("test-places-key");
+  });
+
+  it("prefers the Places address over an unverified scraped page address", async () => {
+    const pageUrl = "https://www.google.com/maps/place/Pondok+Pesantren+Al+Anshor";
+    const correctAddress = "Jl. Sekolah, Wanareja, Kabupaten Cilacap, Jawa Tengah 53265";
+    const fetchMock = stubFetch((url) => {
+      if (url === SHORT_URL) {
+        return new Response(null, { status: 302, headers: { location: pageUrl } });
+      }
+      if (url === pageUrl) {
+        return new Response(
+          '<link rel="preload" href="/maps/preview/place?hl=id&amp;pb=abc">',
+        );
+      }
+      if (url.startsWith("https://www.google.com/maps/preview/place?")) {
+        return new Response(previewPayload());
+      }
+      if (url === "https://places.googleapis.com/v1/places:searchText") {
+        return new Response(
+          JSON.stringify({
+            places: [
+              {
+                formattedAddress: correctAddress,
+                location: { latitude: -7.2810178, longitude: 108.7039185 },
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      throw new Error(`Unexpected fetch host: ${new URL(url).hostname}`);
+    });
+
+    const resolution = await resolveMapsLink(SHORT_URL, "test-places-key");
+
+    expect(resolution.status).toBe("ok");
+    if (resolution.status === "ok") {
+      expect(resolution.result.address).toBe("Jl. Sekolah Wanareja Kabupaten Cilacap Jawa Tengah 53265");
+      expect(resolution.result.address).not.toBe(ADDRESS);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not retry Places API HTTP 429 and keeps the resolved coordinates", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response("rate limited", {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after": "30" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const diagnostics = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const resolution = await resolveMapsLink(FINAL_URL, "test-places-key");
+
+    expect(resolution.status).toBe("rate_limited");
+    if (resolution.status === "rate_limited") {
+      expect(resolution.result?.coordinates).toEqual({
+        latitude: -7.2810178,
+        longitude: 108.7039185,
+      });
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(diagnostics.mock.calls[0][1]))).toMatchObject({
+      stage: "google_places_text_search",
+      hostname: "places.googleapis.com",
+      status: 429,
+      retryAfter: "30",
+    });
   });
 
   it("does not return an invented address when Google provides no place data", async () => {

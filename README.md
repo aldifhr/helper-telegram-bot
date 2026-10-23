@@ -29,7 +29,7 @@ Balasan:
 
 ```text
 Nama: Pondok Pesantren Al Anshor
-Alamat: Jl. Curug Bandung Ciheuleut Limbangan Kec. Wanareja Kabupaten Cilacap Jawa Tengah 53232
+Alamat: Jl. Curug Bandung, Ciheuleut, Limbangan, Kec. Wanareja, Kabupaten Cilacap, Jawa Tengah 53232
 Latitude: -7.2810178
 Longitude: 108.7039185
 ```
@@ -210,22 +210,26 @@ Cara kerja:
 1. Koordinat dicoba dari URL yang diterima sebelum melakukan request.
 2. Jika short link perlu di-resolve, redirect diikuti maksimal 5 kali. Jika URL redirect sudah memuat koordinat, resolver berhenti tanpa mengunduh halaman Google Maps.
 3. HTML halaman Maps hanya diunduh jika redirect tidak memberikan koordinat; ukuran HTML dibatasi 64 KiB dan lookup keseluruhan 20 detik.
-4. Nama dan alamat diambil dari data tempat Google Maps hanya jika perlu.
-5. Jika Google membalas HTTP 429, bot tidak retry dan membalas pesan rate-limit; bila koordinat sudah tersedia, bot tetap mengirim koordinat.
-6. Balasan alamat menyertakan tombol `Salin alamat` jika alamat tersedia dan panjangnya maksimal 256 karakter.
+4. Jika `GOOGLE_PLACES_API_KEY` tersedia dan nama tempat diketahui, bot meminta alamat lewat Places API (New) dan hanya menerima kandidat dalam radius 500 m dari koordinat.
+5. Tanpa key, bot memakai data publik Google Maps jika tersedia. Jika Google membalas HTTP 429, bot tidak retry; koordinat yang sudah ada tetap dikirim.
+6. Balasan Maps menyediakan tombol salin terpisah untuk nama, alamat, latitude, dan longitude. Hasil koordinat teks biasa menyediakan tombol `Salin latitude` dan `Salin longitude`; teks biasa lainnya menyertakan `Salin teks`. Setiap teks yang disalin maksimal 256 karakter.
 
 Catatan penting:
 
-- Bot tidak memakai Google Maps API resmi atau API key. Data diambil dari halaman publik Google Maps. Format halaman dapat berubah atau akses dapat dibatasi Google, sehingga fitur ini bersifat best-effort.
+- Tanpa `GOOGLE_PLACES_API_KEY`, bot mengambil data dari halaman publik Google Maps; format halaman dapat berubah atau akses dapat dibatasi Google. Dengan key, alamat dicari melalui Places API (New).
 - Link yang dibuka hanya domain Google Maps yang diizinkan. Link lain tidak di-fetch.
 - Link harus dapat diakses publik. Link yang membutuhkan login tidak dapat diproses.
-- Untuk dropped pin tanpa halaman tempat, alamat mungkin tidak tersedia; koordinat tetap ditampilkan.
-- URL dikirim ke Google Maps untuk diproses. Bot tidak menyimpannya ke database dan tidak mencatat isi pesan ke log.
+- Untuk dropped pin tanpa nama tempat, Google Places Text Search mungkin tidak dapat menemukan alamat; koordinat tetap ditampilkan.
+- Places API memerlukan API key, Places API (New) aktif, dan billing Google Cloud. Biaya mengikuti tarif dan kuota akun Google.
+- Aktifkan lookup Places di production dengan `npx wrangler secret put GOOGLE_PLACES_API_KEY`. `.env` dan `.dev.vars` hanya untuk skrip lokal/development; keduanya tidak mengatur Worker production.
+- URL dan query nama tempat dikirim ke Google untuk diproses. Bot tidak menyimpannya ke database dan tidak mencatatnya ke log.
+- Batasi key ke Places API dan jangan tulis nilai key ke source code atau commit.
 
 ## Perilaku dan Batas
 
 - Batas aman input adalah 4096 karakter (batas teks pesan Telegram). Pesan yang lebih panjang mendapat balasan bahwa pesan terlalu panjang.
-- Pasangan koordinat dengan koma desimal, seperti `-7,3449461, 108,7079663`, dinormalisasi menjadi `-7.3449461 108.7079663`.
+- Koma desimal hanya diubah menjadi titik pada pasangan koordinat valid, misalnya `-7,3449461, 108,7079663` menjadi `-7.3449461 108.7079663`. Koma pemisah koordinat menjadi spasi.
+- Koma biasa pada teks dan nama/alamat Maps dihapus. Koma desimal hanya diubah menjadi titik dalam pasangan koordinat valid.
 - Jika pesan berisi link Google Maps, fitur Maps diproses dan teks lain dalam pesan yang sama diabaikan.
 - Jika teks tidak memiliki koma, bot membalas bahwa tidak ada koma dan teks tidak berubah.
 - Jika hasil kosong (misalnya hanya koma), bot memberi tahu bahwa tidak ada teks tersisa.
@@ -237,7 +241,7 @@ Catatan penting:
 - Endpoint hanya menerima `POST /webhook` dengan header `X-Telegram-Bot-Api-Secret-Token` yang cocok. Perbandingan dilakukan secara constant-time.
 - Payload update divalidasi sebelum diproses.
 - Fetch untuk fitur Maps hanya diizinkan ke HTTPS host Google Maps, maksimal 5 redirect, 8 detik per request, dan 20 detik per lookup.
-- Bot token dan webhook secret hanya disimpan sebagai Worker Secrets.
+- Bot token, webhook secret, dan Google Places API key hanya disimpan sebagai Worker Secrets.
 - Isi pesan, URL lengkap, query, token, dan alamat tidak dicatat. Log Maps hanya memuat stage, hostname, status, content type, hostname tujuan redirect, dan `Retry-After`.
 - Jangan pernah menulis token ke source code, dokumentasi, tangkapan layar, atau commit Git.
 - Jika token bocor, buat token baru melalui `/revoke` di BotFather, perbarui secret, lalu daftarkan ulang webhook.
