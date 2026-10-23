@@ -4,7 +4,6 @@ const FETCH_TIMEOUT_MS = 8_000;
 const MAX_REDIRECTS = 5;
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
-const NOMINATIM_USER_AGENT = "telegram-comma-remover-bot/1.0";
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const URL_PATTERN = /https?:\/\/[^\s<>"'`]+/gi;
 const TRAILING_PUNCTUATION = /[)\].,!?;:]+$/;
@@ -17,7 +16,6 @@ export interface Coordinates {
 export interface MapsResult {
   name?: string;
   address?: string;
-  addressApproximate?: boolean;
   coordinates: Coordinates;
 }
 
@@ -69,7 +67,6 @@ export async function resolveMapsLink(value: string): Promise<MapsResult | null>
     let coordinates = parseCoordinates(page.url);
     let name = extractPlaceName(page.url);
     let address: string | undefined;
-    let addressApproximate = false;
 
     stage = "Google Maps place data";
     let preview: PreviewData | null = null;
@@ -89,23 +86,9 @@ export async function resolveMapsLink(value: string): Promise<MapsResult | null>
       return null;
     }
 
-    if (!address) {
-      stage = "OpenStreetMap reverse geocoding";
-      try {
-        const fallback = await reverseGeocode(coordinates);
-        if (fallback) {
-          address = fallback;
-          addressApproximate = true;
-        }
-      } catch (error) {
-        console.error("Maps reverse geocoding failed:", errorName(error));
-      }
-    }
-
     return {
       name: name ? cleanText(name) : undefined,
       address: address ? cleanText(address) : undefined,
-      addressApproximate: addressApproximate || undefined,
       coordinates,
     };
   } catch (error) {
@@ -122,8 +105,7 @@ export function formatMapsResult(result: MapsResult): string {
   }
 
   if (result.address) {
-    const label = result.addressApproximate ? "Alamat (perkiraan OSM)" : "Alamat";
-    lines.push(`${label}: ${cleanText(result.address)}`);
+    lines.push(`Alamat: ${cleanText(result.address)}`);
   } else {
     lines.push("Alamat: Tidak tersedia");
   }
@@ -336,35 +318,6 @@ async function loadPreview(html: string): Promise<PreviewData | null> {
   }
 
   return parseMapsPreview(await response.text());
-}
-
-async function reverseGeocode(coordinates: Coordinates): Promise<string | null> {
-  const url = new URL("https://nominatim.openstreetmap.org/reverse");
-  url.searchParams.set("format", "jsonv2");
-  url.searchParams.set("lat", String(coordinates.latitude));
-  url.searchParams.set("lon", String(coordinates.longitude));
-  url.searchParams.set("zoom", "18");
-  url.searchParams.set("addressdetails", "1");
-  url.searchParams.set("accept-language", "id");
-
-  const response = await fetch(url.toString(), {
-    headers: {
-      "user-agent": NOMINATIM_USER_AGENT,
-      accept: "application/json",
-    },
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  });
-
-  if (!response.ok) {
-    return null;
-  }
-
-  const data = (await response.json()) as { display_name?: unknown };
-  if (typeof data.display_name !== "string" || !data.display_name.trim()) {
-    return null;
-  }
-
-  return data.display_name;
 }
 
 function findAddress(data: unknown, name?: string): string | undefined {

@@ -132,17 +132,6 @@ describe("formatMapsResult", () => {
     expect(text).not.toContain(",");
   });
 
-  it("labels an approximate OSM address", () => {
-    const text = formatMapsResult({
-      address: "Limbangan, Cilacap, Jawa Tengah, Indonesia",
-      addressApproximate: true,
-      coordinates: { latitude: -7.28, longitude: 108.7 },
-    });
-
-    expect(text).toContain("Alamat (perkiraan OSM):");
-    expect(text).not.toContain(",");
-  });
-
   it("handles a missing address", () => {
     const text = formatMapsResult({
       coordinates: { latitude: -7.28, longitude: 108.7 },
@@ -174,55 +163,46 @@ describe("resolveMapsLink", () => {
     expect(result).toEqual({
       name: "Pondok Pesantren Al Anshor",
       address: CLEAN_ADDRESS,
-      addressApproximate: undefined,
       coordinates: { latitude: -7.2810178, longitude: 108.7039185 },
     });
   });
 
-  it("falls back to reverse geocoding when the address cannot be parsed", async () => {
-    stubFetch((url) => {
+  it("keeps Google Maps place data as the only address source", async () => {
+    const fetchMock = stubFetch((url) => {
       if (url === SHORT_URL) {
         return new Response(null, { status: 302, headers: { location: FINAL_URL } });
       }
       if (url === FINAL_URL) {
         return new Response("<html>no preview data</html>");
       }
-      if (url.startsWith("https://nominatim.openstreetmap.org/reverse")) {
-        return new Response(
-          JSON.stringify({
-            display_name: "Limbangan Luhur, Cilacap, Jawa Tengah, Indonesia",
-          }),
-        );
-      }
       throw new Error(`Unexpected fetch: ${url}`);
     });
 
     const result = await resolveMapsLink(SHORT_URL);
 
-    expect(result?.addressApproximate).toBe(true);
-    expect(result?.address).toBe("Limbangan Luhur Cilacap Jawa Tengah Indonesia");
+    expect(result?.name).toBe("Pondok Pesantren Al Anshor");
+    expect(result?.address).toBeUndefined();
     expect(result?.coordinates).toEqual({ latitude: -7.2810178, longitude: 108.7039185 });
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("openstreetmap"))).toBe(false);
   });
 
-  it("uses reverse geocoding when Google blocks the place page", async () => {
+  it("keeps coordinates when Google blocks the place page", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    stubFetch((url) => {
+    const fetchMock = stubFetch((url) => {
       if (url === SHORT_URL) {
         return new Response(null, { status: 302, headers: { location: FINAL_URL } });
       }
       if (url === FINAL_URL) {
         return new Response("blocked", { status: 403 });
       }
-      if (url.startsWith("https://nominatim.openstreetmap.org/reverse")) {
-        return new Response(JSON.stringify({ display_name: "Cilacap, Jawa Tengah, Indonesia" }));
-      }
       throw new Error(`Unexpected fetch: ${url}`);
     });
 
     const result = await resolveMapsLink(SHORT_URL);
 
-    expect(result?.addressApproximate).toBe(true);
+    expect(result?.address).toBeUndefined();
     expect(result?.coordinates).toEqual({ latitude: -7.2810178, longitude: 108.7039185 });
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("openstreetmap"))).toBe(false);
   });
 
   it("does not fetch unsupported URLs", async () => {

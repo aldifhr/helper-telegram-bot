@@ -210,7 +210,7 @@ Cara kerja:
 1. Short link di-resolve maksimal 5 redirect.
 2. Koordinat diambil dari parameter `!3d`/`!4d`, `@lat,lng`, atau `q=lat,lng`.
 3. Nama dan alamat diambil dari data tempat halaman Google Maps.
-4. Jika alamat tidak ditemukan, bot melakukan reverse geocode melalui OpenStreetMap Nominatim dan memberi label `Alamat (perkiraan OSM)`.
+4. Jika data alamat Google tidak tersedia, bot menampilkan `Alamat: Tidak tersedia` dan tetap membalas koordinat yang berhasil dibaca.
 5. Koma dihapus dari nama dan alamat sebelum dibalas.
 
 Catatan penting:
@@ -219,7 +219,7 @@ Catatan penting:
 - Link yang dibuka hanya domain Google Maps yang diizinkan. Link lain tidak di-fetch.
 - Link harus dapat diakses publik. Link yang membutuhkan login tidak dapat diproses.
 - Untuk dropped pin tanpa halaman tempat, alamat mungkin tidak tersedia; koordinat tetap ditampilkan.
-- URL dan koordinat dikirim ke Google dan/atau OpenStreetMap untuk diproses. Bot tidak menyimpannya ke database dan tidak mencatat isi pesan ke log.
+- URL dikirim ke Google Maps untuk diproses. Bot tidak menyimpannya ke database dan tidak mencatat isi pesan ke log.
 
 ## Perilaku dan Batas
 
@@ -234,7 +234,7 @@ Catatan penting:
 
 - Endpoint hanya menerima `POST /webhook` dengan header `X-Telegram-Bot-Api-Secret-Token` yang cocok. Perbandingan dilakukan secara constant-time.
 - Payload update divalidasi sebelum diproses.
-- Fetch untuk fitur Maps hanya diizinkan ke host Google Maps dan Nominatim, dengan batas redirect dan timeout 8 detik per request.
+- Fetch untuk fitur Maps hanya diizinkan ke host Google Maps, dengan batas redirect dan timeout 8 detik per request.
 - Bot token dan webhook secret hanya disimpan sebagai Worker Secrets.
 - Isi pesan pengguna tidak dicatat ke log. Log hanya berisi status/error dari Telegram API.
 - Jangan pernah menulis token ke source code, dokumentasi, tangkapan layar, atau commit Git.
@@ -260,4 +260,4 @@ Catatan penting:
 - **Bot diam di grup**: periksa privacy mode BotFather atau gunakan `/clean@NamaBot <teks>`.
 - **Webhook terdaftar tetapi salah URL**: jalankan ulang `setWebhook` dengan URL yang benar.
 - **Link Maps gagal diproses**: pastikan link publik dan mengarah ke tempat/titik, bukan link yang membutuhkan login. Coba buka link di browser; jika Google menampilkan captcha/consent, Worker juga tidak dapat membacanya.
-- **Alamat diberi label perkiraan OSM**: data tempat Google tidak memuat alamat, sehingga bot memakai reverse geocode OpenStreetMap. Hasilnya bisa hanya sampai tingkat desa/kecamatan.
+- **Alamat tidak tersedia**: Google Maps tidak mengirim data alamat untuk link tersebut. Bot tetap mengirim nama tempat dan koordinat jika tersedia.
