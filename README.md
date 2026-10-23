@@ -212,6 +212,7 @@ Cara kerja:
 3. Nama dan alamat diambil dari data tempat halaman Google Maps.
 4. Jika data alamat Google tidak tersedia, bot menampilkan `Alamat: Tidak tersedia` dan tetap membalas koordinat yang berhasil dibaca.
 5. Koma dihapus dari nama dan alamat sebelum dibalas.
+6. Balasan alamat menyertakan tombol `Salin alamat` yang menyalin alamat ke clipboard jika panjangnya maksimal 256 karakter.
 
 Catatan penting:
 

@@ -5,6 +5,7 @@ const REQUEST_TIMEOUT_MS = 10_000;
 
 interface SendMessageOptions {
   replyToMessageId?: number;
+  copyText?: string;
 }
 
 export async function sendMessage(
@@ -23,6 +24,14 @@ export async function sendMessage(
     payload.reply_parameters = {
       message_id: options.replyToMessageId,
       allow_sending_without_reply: true,
+    };
+  }
+
+  if (options.copyText && options.copyText.length <= 256) {
+    payload.reply_markup = {
+      inline_keyboard: [
+        [{ text: "Salin alamat", copy_text: { text: options.copyText } }],
+      ],
     };
   }
 

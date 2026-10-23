@@ -158,7 +158,8 @@ async function processMapsAndRespond(
     return replyAndRespond(env, message, MAPS_FAILED);
   }
 
-  return replyAndRespond(env, message, formatMapsResult(result));
+  const copyText = result.address && result.address.length <= 256 ? result.address : undefined;
+  return replyAndRespond(env, message, formatMapsResult(result), copyText);
 }
 
 async function processAndRespond(
@@ -183,9 +184,11 @@ async function replyAndRespond(
   env: Env,
   message: TelegramMessage,
   text: string,
+  copyText?: string,
 ): Promise<Response> {
   const sent = await sendMessage(env, message.chat.id, text, {
     replyToMessageId: message.message_id,
+    copyText,
   });
 
   if (!sent) {

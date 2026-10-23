@@ -297,12 +297,15 @@ describe("map link handling", () => {
     return fetchMock;
   }
 
-  function telegramText(fetchMock: ReturnType<typeof stubMapsFetch>): string {
+  function telegramPayload(fetchMock: ReturnType<typeof stubMapsFetch>): Record<string, unknown> {
     const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
     const call = calls.find(([url]) => url.includes("api.telegram.org"));
     expect(call).toBeDefined();
-    const body = JSON.parse(String(call?.[1].body)) as { text?: string };
-    return body.text ?? "";
+    return JSON.parse(String(call?.[1].body)) as Record<string, unknown>;
+  }
+
+  function telegramText(fetchMock: ReturnType<typeof stubMapsFetch>): string {
+    return String(telegramPayload(fetchMock).text ?? "");
   }
 
   it("replies with the map address and coordinates", async () => {
@@ -319,6 +322,9 @@ describe("map link handling", () => {
     expect(text).toContain("Latitude: -7.2810178");
     expect(text).toContain("Longitude: 108.7039185");
     expect(text).not.toContain(",");
+    expect(telegramPayload(fetchMock).reply_markup).toEqual({
+      inline_keyboard: [[{ text: "Salin alamat", copy_text: { text: address.replaceAll(",", "") } }]],
+    });
   });
 
   it("replies with an error when the map link cannot be read", async () => {
