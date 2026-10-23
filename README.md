@@ -5,6 +5,7 @@ Bot Telegram ringan yang menghapus semua karakter koma ASCII (`,`) dari teks dan
 ## Fitur
 
 - Menghapus semua koma tanpa mengubah karakter lain. Titik desimal, tanda minus, spasi, emoji, dan huruf tetap dipertahankan.
+- Membaca link Google Maps dan membalas nama tempat, alamat tanpa koma, latitude, dan longitude.
 - Perintah `/start`, `/help`, dan `/clean`.
 - Pesan teks biasa langsung diproses dan dibalas ke pesan asli.
 - Hasil dikirim sebagai teks biasa (tanpa Markdown/HTML) agar aman disalin.
@@ -18,6 +19,21 @@ Contoh:
 Jakarta, Bandung, Surabaya   ->  Jakarta Bandung Surabaya
 ```
 
+Contoh link Google Maps:
+
+```text
+https://maps.app.goo.gl/bqwmTtGrR9AvJGHm9
+```
+
+Balasan:
+
+```text
+Nama: Pondok Pesantren Al Anshor
+Alamat: Jl. Curug Bandung Ciheuleut Limbangan Kec. Wanareja Kabupaten Cilacap Jawa Tengah 53232
+Latitude: -7.2810178
+Longitude: 108.7039185
+```
+
 ## Struktur Proyek
 
 ```text
@@ -25,10 +41,12 @@ src/
   index.ts       # Entry point Worker, routing, validasi, handler update
   telegram.ts    # Helper Telegram sendMessage
   processor.ts   # Fungsi pure penghapus koma
+  maps.ts        # Resolver link Google Maps dan formatter hasil
   types.ts       # Tipe Env dan payload Telegram
 tests/
   processor.test.ts
   handler.test.ts
+  maps.test.ts
 wrangler.jsonc
 ```
 
@@ -175,9 +193,38 @@ npm test
 npm run typecheck
 ```
 
+## Fitur Google Maps
+
+Kirim link tempat atau titik dari Google Maps. Link yang didukung antara lain:
+
+```text
+https://maps.app.goo.gl/...
+https://goo.gl/maps/...
+https://www.google.com/maps/...
+https://maps.google.com/...
+https://www.google.co.id/maps/...
+```
+
+Cara kerja:
+
+1. Short link di-resolve maksimal 5 redirect.
+2. Koordinat diambil dari parameter `!3d`/`!4d`, `@lat,lng`, atau `q=lat,lng`.
+3. Nama dan alamat diambil dari data tempat halaman Google Maps.
+4. Jika alamat tidak ditemukan, bot melakukan reverse geocode melalui OpenStreetMap Nominatim dan memberi label `Alamat (perkiraan OSM)`.
+5. Koma dihapus dari nama dan alamat sebelum dibalas.
+
+Catatan penting:
+
+- Bot tidak memakai Google Maps API resmi atau API key. Data diambil dari halaman publik Google Maps. Format halaman dapat berubah atau akses dapat dibatasi Google, sehingga fitur ini bersifat best-effort.
+- Link yang dibuka hanya domain Google Maps yang diizinkan. Link lain tidak di-fetch.
+- Link harus dapat diakses publik. Link yang membutuhkan login tidak dapat diproses.
+- Untuk dropped pin tanpa halaman tempat, alamat mungkin tidak tersedia; koordinat tetap ditampilkan.
+- URL dan koordinat dikirim ke Google dan/atau OpenStreetMap untuk diproses. Bot tidak menyimpannya ke database dan tidak mencatat isi pesan ke log.
+
 ## Perilaku dan Batas
 
 - Batas aman input adalah 4096 karakter (batas teks pesan Telegram). Pesan yang lebih panjang mendapat balasan bahwa pesan terlalu panjang.
+- Jika pesan berisi link Google Maps, fitur Maps diproses dan teks lain dalam pesan yang sama diabaikan.
 - Jika teks tidak memiliki koma, bot membalas bahwa tidak ada koma dan teks tidak berubah.
 - Jika hasil kosong (misalnya hanya koma), bot memberi tahu bahwa tidak ada teks tersisa.
 - Perintah yang tidak dikenal diabaikan.
@@ -187,6 +234,7 @@ npm run typecheck
 
 - Endpoint hanya menerima `POST /webhook` dengan header `X-Telegram-Bot-Api-Secret-Token` yang cocok. Perbandingan dilakukan secara constant-time.
 - Payload update divalidasi sebelum diproses.
+- Fetch untuk fitur Maps hanya diizinkan ke host Google Maps dan Nominatim, dengan batas redirect dan timeout 8 detik per request.
 - Bot token dan webhook secret hanya disimpan sebagai Worker Secrets.
 - Isi pesan pengguna tidak dicatat ke log. Log hanya berisi status/error dari Telegram API.
 - Jangan pernah menulis token ke source code, dokumentasi, tangkapan layar, atau commit Git.
@@ -211,3 +259,5 @@ npm run typecheck
 - **404**: URL webhook harus berakhiran `/webhook`.
 - **Bot diam di grup**: periksa privacy mode BotFather atau gunakan `/clean@NamaBot <teks>`.
 - **Webhook terdaftar tetapi salah URL**: jalankan ulang `setWebhook` dengan URL yang benar.
+- **Link Maps gagal diproses**: pastikan link publik dan mengarah ke tempat/titik, bukan link yang membutuhkan login. Coba buka link di browser; jika Google menampilkan captcha/consent, Worker juga tidak dapat membacanya.
+- **Alamat diberi label perkiraan OSM**: data tempat Google tidak memuat alamat, sehingga bot memakai reverse geocode OpenStreetMap. Hasilnya bisa hanya sampai tingkat desa/kecamatan.

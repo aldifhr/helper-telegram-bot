@@ -251,3 +251,82 @@ describe("message handling", () => {
   });
 });
 
+
+describe("map link handling", () => {
+  const shortUrl = "https://maps.app.goo.gl/bqwmTtGrR9AvJGHm9";
+  const finalUrl =
+    "https://www.google.com/maps/place/Pondok+Pesantren+Al+Anshor/@-7.307264,108.7143936,9580m/data=!3m1!1e3!4m6!3m5!1s0x2e6f7b93b94bf461:0xdc7e1422a9740d9b!8m2!3d-7.2810178!4d108.7039185!16s%2Fg%2F11jcfz2sm9?entry=tts";
+  const address =
+    "Jl. Curug Bandung, Ciheuleut, Limbangan, Kec. Wanareja, Kabupaten Cilacap, Jawa Tengah 53232";
+
+  function mapsPreview(): string {
+    const root: unknown[] = [];
+    root[9] = [null, null, -7.2810178, 108.7039185];
+    root[11] = "Pondok Pesantren Al Anshor";
+    root[18] = `Pondok Pesantren Al Anshor, ${address}`;
+    root[39] = address;
+    return ")]}'\n" + JSON.stringify([null, null, null, null, null, null, root]);
+  }
+
+  function stubMapsFetch(mapFailure = false) {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === shortUrl) {
+        if (mapFailure) {
+          return new Response("not found", { status: 404 });
+        }
+        return new Response(null, { status: 302, headers: { location: finalUrl } });
+      }
+      if (url === finalUrl) {
+        return new Response(
+          '<html><head><link rel="preload" href="/maps/preview/place?auth_user=0&amp;pb=abc"></head></html>',
+        );
+      }
+      if (url.startsWith("https://www.google.com/maps/preview/place?")) {
+        return new Response(mapsPreview());
+      }
+      if (url.includes("api.telegram.org")) {
+        return new Response(JSON.stringify({ ok: true, result: { message_id: 99 } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function telegramText(fetchMock: ReturnType<typeof stubMapsFetch>): string {
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
+    const call = calls.find(([url]) => url.includes("api.telegram.org"));
+    expect(call).toBeDefined();
+    const body = JSON.parse(String(call?.[1].body)) as { text?: string };
+    return body.text ?? "";
+  }
+
+  it("replies with the map address and coordinates", async () => {
+    const fetchMock = stubMapsFetch();
+
+    const response = await sendUpdate(textUpdate(`Lokasi: ${shortUrl}`));
+
+    expect(response.status).toBe(200);
+    const text = telegramText(fetchMock);
+    expect(text).toContain("Nama: Pondok Pesantren Al Anshor");
+    expect(text).toContain(
+      "Alamat: Jl. Curug Bandung Ciheuleut Limbangan Kec. Wanareja Kabupaten Cilacap Jawa Tengah 53232",
+    );
+    expect(text).toContain("Latitude: -7.2810178");
+    expect(text).toContain("Longitude: 108.7039185");
+    expect(text).not.toContain(",");
+  });
+
+  it("replies with an error when the map link cannot be read", async () => {
+    const fetchMock = stubMapsFetch(true);
+
+    const response = await sendUpdate(textUpdate(shortUrl));
+
+    expect(response.status).toBe(200);
+    expect(telegramText(fetchMock)).toContain("tidak bisa diproses");
+  });
+});

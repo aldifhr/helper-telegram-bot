@@ -1,4 +1,5 @@
-﻿import { MAX_INPUT_LENGTH, removeCommas } from "./processor";
+﻿import { extractMapsUrl, formatMapsResult, resolveMapsLink } from "./maps";
+import { MAX_INPUT_LENGTH, removeCommas } from "./processor";
 import { sendMessage } from "./telegram";
 import type { Env, TelegramMessage, TelegramUpdate } from "./types";
 
@@ -9,6 +10,7 @@ const START_TEXT = [
   "Halo! Saya bot penghapus koma.",
   "",
   "Kirim teks apa saja dan saya akan menghapus semua tanda koma (,) tanpa mengubah karakter lainnya.",
+  "Kirim link Google Maps untuk melihat nama tempat, alamat tanpa koma, dan koordinat.",
   "",
   "Perintah:",
   "/start - sambutan",
@@ -31,6 +33,10 @@ const HELP_TEXT = [
   "",
   "Yang dihapus hanya karakter koma ASCII (,).",
   "Titik desimal, tanda minus, spasi, emoji, dan karakter lain tetap dipertahankan.",
+  "",
+  "Link Google Maps:",
+  "Kirim link tempat atau titik dari Google Maps, misalnya maps.app.goo.gl/...",
+  "Bot membalas nama tempat, alamat tanpa koma, latitude, dan longitude.",
 ].join("\n");
 
 const CLEAN_PROMPT =
@@ -40,6 +46,8 @@ const EMPTY_TEXT = "Kirim teks yang ingin diproses.";
 const EMPTY_RESULT = "Tidak ada teks yang tersisa setelah tanda koma dihapus.";
 const NO_COMMAS = "Tidak ada tanda koma yang ditemukan. Teks tidak berubah.";
 const TOO_LONG = `Pesan terlalu panjang. Batas aman adalah ${MAX_INPUT_LENGTH} karakter.`;
+const MAPS_FAILED =
+  "Link Google Maps tidak bisa diproses. Pastikan link mengarah ke tempat atau titik di Google Maps.";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -113,7 +121,7 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<Response>
         if (!command.arguments) {
           return replyAndRespond(env, message, CLEAN_PROMPT);
         }
-        return processAndRespond(env, message, command.arguments);
+        return processContentAndRespond(env, message, command.arguments);
       default:
         return textResponse("OK", 200);
     }
@@ -123,7 +131,34 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<Response>
     return replyAndRespond(env, message, EMPTY_TEXT);
   }
 
+  return processContentAndRespond(env, message, text);
+}
+
+async function processContentAndRespond(
+  env: Env,
+  message: TelegramMessage,
+  text: string,
+): Promise<Response> {
+  const mapsUrl = extractMapsUrl(text);
+  if (mapsUrl) {
+    return processMapsAndRespond(env, message, mapsUrl);
+  }
+
   return processAndRespond(env, message, text);
+}
+
+async function processMapsAndRespond(
+  env: Env,
+  message: TelegramMessage,
+  mapsUrl: string,
+): Promise<Response> {
+  const result = await resolveMapsLink(mapsUrl);
+
+  if (!result) {
+    return replyAndRespond(env, message, MAPS_FAILED);
+  }
+
+  return replyAndRespond(env, message, formatMapsResult(result));
 }
 
 async function processAndRespond(
