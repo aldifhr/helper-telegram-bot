@@ -254,8 +254,7 @@ describe("message handling", () => {
 
 describe("map link handling", () => {
   const shortUrl = "https://maps.app.goo.gl/bqwmTtGrR9AvJGHm9";
-  const finalUrl =
-    "https://www.google.com/maps/place/Pondok+Pesantren+Al+Anshor/@-7.307264,108.7143936,9580m/data=!3m1!1e3!4m6!3m5!1s0x2e6f7b93b94bf461:0xdc7e1422a9740d9b!8m2!3d-7.2810178!4d108.7039185!16s%2Fg%2F11jcfz2sm9?entry=tts";
+  const finalUrl = "https://www.google.com/maps/place/Pondok+Pesantren+Al+Anshor";
   const address =
     "Jl. Curug Bandung, Ciheuleut, Limbangan, Kec. Wanareja, Kabupaten Cilacap, Jawa Tengah 53232";
 

@@ -142,81 +142,170 @@ describe("formatMapsResult", () => {
 });
 
 describe("resolveMapsLink", () => {
-  it("resolves a short link and parses the place details", async () => {
-    stubFetch((url) => {
+  it("extracts coordinates from short-link redirect metadata and skips page HTML", async () => {
+    const fetchMock = stubFetch((url) => {
       if (url === SHORT_URL) {
         return new Response(null, { status: 302, headers: { location: FINAL_URL } });
       }
-      if (url === FINAL_URL) {
+      throw new Error(`Unexpected fetch host: ${new URL(url).hostname}`);
+    });
+    const diagnostics = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const resolution = await resolveMapsLink(SHORT_URL);
+
+    expect(resolution).toEqual({
+      status: "ok",
+      result: {
+        name: "Pondok Pesantren Al Anshor",
+        coordinates: { latitude: -7.2810178, longitude: 108.7039185 },
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const diagnostic = JSON.parse(String(diagnostics.mock.calls[0][1])) as Record<string, unknown>;
+    expect(diagnostic).toMatchObject({
+      stage: "maps_short_link_redirect",
+      hostname: "maps.app.goo.gl",
+      status: 302,
+      redirectHostname: "www.google.com",
+    });
+    expect(JSON.stringify(diagnostic)).not.toContain("bqwmTtGrR9AvJGHm9");
+  });
+
+  it("fetches page data only when the redirect does not expose coordinates", async () => {
+    const pageUrl = "https://www.google.com/maps/place/Pondok+Pesantren+Al+Anshor";
+    const fetchMock = stubFetch((url) => {
+      if (url === SHORT_URL) {
+        return new Response(null, { status: 302, headers: { location: pageUrl } });
+      }
+      if (url === pageUrl) {
         return new Response(
           '<html><head><link rel="preload" href="/maps/preview/place?authuser=0&amp;hl=id&amp;pb=abc"></head></html>',
         );
       }
       if (url.startsWith("https://www.google.com/maps/preview/place?")) {
-        return new Response(previewPayload());
+        return new Response(previewPayload(), {
+          headers: { "content-type": "application/json; charset=UTF-8" },
+        });
       }
-      throw new Error(`Unexpected fetch: ${url}`);
+      throw new Error(`Unexpected fetch host: ${new URL(url).hostname}`);
     });
 
-    const result = await resolveMapsLink(SHORT_URL);
+    const resolution = await resolveMapsLink(SHORT_URL);
 
-    expect(result).toEqual({
-      name: "Pondok Pesantren Al Anshor",
-      address: CLEAN_ADDRESS,
-      coordinates: { latitude: -7.2810178, longitude: 108.7039185 },
+    expect(resolution.status).toBe("ok");
+    if (resolution.status === "ok") {
+      expect(resolution.result).toEqual({
+        name: "Pondok Pesantren Al Anshor",
+        address: CLEAN_ADDRESS,
+        coordinates: { latitude: -7.2810178, longitude: 108.7039185 },
+      });
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("reports HTTP 429 from maps.app.goo.gl without retrying", async () => {
+    const fetchMock = stubFetch(() =>
+      new Response("rate limited", {
+        status: 429,
+        headers: { "content-type": "text/plain", "retry-after": "60" },
+      }),
+    );
+    const diagnostics = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const resolution = await resolveMapsLink(SHORT_URL);
+
+    expect(resolution).toEqual({ status: "rate_limited" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(diagnostics.mock.calls[0][1]))).toMatchObject({
+      stage: "maps_short_link_redirect",
+      hostname: "maps.app.goo.gl",
+      status: 429,
+      contentType: "text/plain",
+      retryAfter: "60",
     });
   });
 
-  it("keeps Google Maps place data as the only address source", async () => {
+  it("reports HTTP 429 from google.com/maps without retrying", async () => {
+    const pageUrl = "https://www.google.com/maps/place/Pondok+Pesantren+Al+Anshor";
     const fetchMock = stubFetch((url) => {
       if (url === SHORT_URL) {
-        return new Response(null, { status: 302, headers: { location: FINAL_URL } });
+        return new Response(null, { status: 302, headers: { location: pageUrl } });
       }
-      if (url === FINAL_URL) {
-        return new Response("<html>no preview data</html>");
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
+      return new Response("rate limited", {
+        status: 429,
+        headers: { "content-type": "text/html", "retry-after": "120" },
+      });
     });
+    const diagnostics = vi.spyOn(console, "info").mockImplementation(() => undefined);
 
-    const result = await resolveMapsLink(SHORT_URL);
+    const resolution = await resolveMapsLink(SHORT_URL);
 
-    expect(result?.name).toBe("Pondok Pesantren Al Anshor");
-    expect(result?.address).toBeUndefined();
-    expect(result?.coordinates).toEqual({ latitude: -7.2810178, longitude: 108.7039185 });
-    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("openstreetmap"))).toBe(false);
+    expect(resolution).toEqual({ status: "rate_limited" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(diagnostics.mock.calls[1][1]))).toMatchObject({
+      stage: "google_maps_redirect",
+      hostname: "www.google.com",
+      status: 429,
+      contentType: "text/html",
+      retryAfter: "120",
+    });
   });
 
-  it("keeps coordinates when Google blocks the place page", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const fetchMock = stubFetch((url) => {
-      if (url === SHORT_URL) {
-        return new Response(null, { status: 302, headers: { location: FINAL_URL } });
-      }
-      if (url === FINAL_URL) {
-        return new Response("blocked", { status: 403 });
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
+  it("returns unavailable and logs host when the short-link request fails", async () => {
+    const fetchMock = stubFetch(() => {
+      throw new Error("network down");
     });
+    const diagnostics = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    const result = await resolveMapsLink(SHORT_URL);
+    const resolution = await resolveMapsLink(SHORT_URL);
 
-    expect(result?.address).toBeUndefined();
-    expect(result?.coordinates).toEqual({ latitude: -7.2810178, longitude: 108.7039185 });
-    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("openstreetmap"))).toBe(false);
+    expect(resolution).toEqual({ status: "unavailable" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(diagnostics.mock.calls[0][1]))).toMatchObject({
+      stage: "maps_short_link_redirect",
+      hostname: "maps.app.goo.gl",
+      status: "network_error",
+    });
   });
 
-  it("does not fetch unsupported URLs", async () => {
+  it("does not fetch for malformed or unsupported URLs", async () => {
     const fetchMock = stubFetch(() => new Response("unexpected"));
 
-    expect(await resolveMapsLink("https://example.com/maps/place/foo")).toBeNull();
+    expect(await resolveMapsLink("not a URL")).toEqual({ status: "unavailable" });
+    expect(await resolveMapsLink("https://example.com/maps/place/foo")).toEqual({
+      status: "unavailable",
+    });
+    expect(await resolveMapsLink("http://maps.app.goo.gl/example")).toEqual({
+      status: "unavailable",
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("returns null when the network request fails", async () => {
-    stubFetch(() => {
-      throw new Error("network down");
+  it("returns coordinates directly from a full Maps URL without fetching", async () => {
+    const fetchMock = stubFetch(() => new Response("unexpected"));
+
+    expect(await resolveMapsLink(FINAL_URL)).toEqual({
+      status: "ok",
+      result: {
+        name: "Pondok Pesantren Al Anshor",
+        coordinates: { latitude: -7.2810178, longitude: 108.7039185 },
+      },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not return an invented address when Google provides no place data", async () => {
+    const pageUrl = "https://www.google.com/maps/place/Pondok+Pesantren+Al+Anshor";
+    stubFetch((url) => {
+      if (url === SHORT_URL) {
+        return new Response(null, { status: 302, headers: { location: pageUrl } });
+      }
+      if (url === pageUrl) {
+        return new Response("<html>no preview data</html>");
+      }
+      throw new Error(`Unexpected fetch host: ${new URL(url).hostname}`);
     });
 
-    expect(await resolveMapsLink(SHORT_URL)).toBeNull();
+    expect(await resolveMapsLink(SHORT_URL)).toEqual({ status: "unavailable" });
   });
 });

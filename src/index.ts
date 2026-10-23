@@ -48,6 +48,8 @@ const NO_COMMAS = "Tidak ada tanda koma yang ditemukan. Teks tidak berubah.";
 const TOO_LONG = `Pesan terlalu panjang. Batas aman adalah ${MAX_INPUT_LENGTH} karakter.`;
 const MAPS_FAILED =
   "Link Google Maps tidak bisa diproses. Pastikan link mengarah ke tempat atau titik di Google Maps.";
+const MAPS_RATE_LIMITED =
+  "Google Maps sedang membatasi permintaan (HTTP 429). Bot tidak akan mencoba ulang otomatis. Coba lagi nanti atau kirim link yang sudah memuat koordinat.";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -152,14 +154,38 @@ async function processMapsAndRespond(
   message: TelegramMessage,
   mapsUrl: string,
 ): Promise<Response> {
-  const result = await resolveMapsLink(mapsUrl);
+  try {
+    const resolution = await resolveMapsLink(mapsUrl);
 
-  if (!result) {
-    return replyAndRespond(env, message, MAPS_FAILED);
+    if (resolution.status === "rate_limited") {
+      const result = resolution.result;
+      if (!result) {
+        return replyAndRespond(env, message, MAPS_RATE_LIMITED);
+      }
+
+      const text = `${formatMapsResult(result)}\n\nGoogle Maps membatasi permintaan (HTTP 429); alamat mungkin tidak tersedia.`;
+      const copyText = result.address && result.address.length <= 256 ? result.address : undefined;
+      return replyAndRespond(env, message, text, copyText);
+    }
+
+    if (resolution.status === "unavailable") {
+      return replyAndRespond(env, message, MAPS_FAILED);
+    }
+
+    const result = resolution.result;
+    const copyText = result.address && result.address.length <= 256 ? result.address : undefined;
+    return replyAndRespond(env, message, formatMapsResult(result), copyText);
+  } catch (error) {
+    console.error("Google Maps resolution failed:", {
+      errorType: error instanceof Error ? error.name : "unknown error",
+    });
+
+    return replyAndRespond(
+      env,
+      message,
+      "Google Maps sedang tidak bisa diproses. Coba kirim link lengkap atau koordinatnya secara langsung.",
+    );
   }
-
-  const copyText = result.address && result.address.length <= 256 ? result.address : undefined;
-  return replyAndRespond(env, message, formatMapsResult(result), copyText);
 }
 
 async function processAndRespond(

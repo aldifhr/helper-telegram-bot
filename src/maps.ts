@@ -1,7 +1,9 @@
 import { removeCommas } from "./processor";
 
-const FETCH_TIMEOUT_MS = 8_000;
+const MAX_LOOKUP_MS = 20_000;
 const MAX_REDIRECTS = 5;
+const MAX_HTML_BYTES = 64 * 1024;
+const MAX_PREVIEW_BYTES = 256 * 1024;
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -19,6 +21,11 @@ export interface MapsResult {
   coordinates: Coordinates;
 }
 
+export type MapsResolution =
+  | { status: "ok"; result: MapsResult }
+  | { status: "rate_limited"; result?: MapsResult }
+  | { status: "unavailable" };
+
 interface PreviewData {
   name?: string;
   address?: string;
@@ -28,6 +35,12 @@ interface PreviewData {
 interface MapsPage {
   url: URL;
   html: string;
+  rateLimited?: boolean;
+}
+
+interface PreviewResult {
+  data: PreviewData | null;
+  rateLimited: boolean;
 }
 
 export function extractMapsUrl(text: string): string | null {
@@ -45,37 +58,54 @@ export function extractMapsUrl(text: string): string | null {
   return null;
 }
 
-export async function resolveMapsLink(value: string): Promise<MapsResult | null> {
+export async function resolveMapsLink(value: string): Promise<MapsResolution> {
   let start: URL;
   try {
     start = new URL(value);
   } catch {
-    return null;
+    return { status: "unavailable" };
   }
 
   if (!isSupportedMapsUrl(start)) {
-    return null;
+    return { status: "unavailable" };
   }
 
-  let stage = "Google Maps redirect";
+  const directCoordinates = parseCoordinates(start);
+  if (directCoordinates) {
+    return {
+      status: "ok",
+      result: {
+        name: cleanOptionalText(extractPlaceName(start)),
+        coordinates: directCoordinates,
+      },
+    };
+  }
+
+  const deadline = Date.now() + MAX_LOOKUP_MS;
+  let stage = "maps_redirect";
   try {
-    const page = await loadMapsPage(start);
+    const page = await loadMapsPage(start, deadline);
     if (!page) {
-      return null;
+      return { status: "unavailable" };
     }
 
     let coordinates = parseCoordinates(page.url);
     let name = extractPlaceName(page.url);
     let address: string | undefined;
+    let rateLimited = page.rateLimited ?? false;
 
-    stage = "Google Maps place data";
-    let preview: PreviewData | null = null;
-    try {
-      preview = await loadPreview(page.html);
-    } catch (error) {
-      console.error("Maps place data request failed:", errorName(error));
+    if (!page.html) {
+      if (!coordinates) {
+        return rateLimited ? { status: "rate_limited" } : { status: "unavailable" };
+      }
+      const result = { name: cleanOptionalText(name), coordinates };
+      return rateLimited ? { status: "rate_limited", result } : { status: "ok", result };
     }
 
+    stage = "google_place_data";
+    const previewResult = await loadPreview(page.html, deadline);
+    rateLimited ||= previewResult.rateLimited;
+    const preview = previewResult.data;
     if (preview) {
       name = preview.name ?? name;
       address = preview.address;
@@ -83,17 +113,18 @@ export async function resolveMapsLink(value: string): Promise<MapsResult | null>
     }
 
     if (!coordinates) {
-      return null;
+      return rateLimited ? { status: "rate_limited" } : { status: "unavailable" };
     }
 
-    return {
-      name: name ? cleanText(name) : undefined,
+    const result = {
+      name: cleanOptionalText(name),
       address: address ? cleanText(address) : undefined,
       coordinates,
     };
+    return rateLimited ? { status: "rate_limited", result } : { status: "ok", result };
   } catch (error) {
-    console.error("Maps lookup failed during", stage, errorName(error));
-    return null;
+    logNetworkFailure(stage, error);
+    return { status: "unavailable" };
   }
 }
 
@@ -204,7 +235,7 @@ export function parseMapsPreview(payload: string, fallbackName?: string): Previe
 }
 
 function isSupportedMapsUrl(url: URL): boolean {
-  if (!isGoogleHost(url.hostname)) {
+  if (url.protocol !== "https:" || url.username || url.password || !isGoogleHost(url.hostname)) {
     return false;
   }
 
@@ -229,7 +260,7 @@ function isGoogleHost(hostname: string): boolean {
   );
 }
 
-async function loadMapsPage(start: URL): Promise<MapsPage | null> {
+async function loadMapsPage(start: URL, deadline: number): Promise<MapsPage | null> {
   let current = start;
 
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
@@ -237,6 +268,7 @@ async function loadMapsPage(start: URL): Promise<MapsPage | null> {
       return null;
     }
 
+    const stage = redirects === 0 ? "maps_short_link_redirect" : "google_maps_redirect";
     let response: Response;
     try {
       response = await fetch(current.toString(), {
@@ -246,78 +278,208 @@ async function loadMapsPage(start: URL): Promise<MapsPage | null> {
           "accept-language": "id-ID,id;q=0.9,en;q=0.8",
           accept: "text/html,application/xhtml+xml",
         },
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        signal: timeoutSignal(deadline),
       });
     } catch (error) {
-      console.error("Google Maps page request failed:", errorName(error));
+      logNetworkFailure(stage, error, current.hostname);
       return isSupportedMapsUrl(current) ? { url: current, html: "" } : null;
     }
 
+    const location = response.headers.get("location");
+    const locationHostname = locationHostnameOf(location, current);
+    const responseHostname = hostnameOf(response.url);
+    logResponse(
+      stage,
+      current.hostname,
+      response,
+      locationHostname ?? (responseHostname !== current.hostname ? responseHostname : undefined),
+    );
+
     if (REDIRECT_STATUSES.has(response.status)) {
-      const location = response.headers.get("location");
-      if (!location) {
+      await cancelBody(response);
+      if (!location || !locationHostname) {
         return null;
       }
-      current = new URL(location, current);
-      continue;
-    }
 
-    if (!response.ok) {
-      console.error("Google Maps page returned HTTP", response.status);
-      return { url: current, html: "" };
+      current = new URL(location, current);
+      if (!isGoogleHost(current.hostname)) {
+        return null;
+      }
+
+      const coordinates = parseCoordinates(current);
+      if (coordinates) {
+        return { url: current, html: "" };
+      }
+      continue;
     }
 
     const finalUrl = response.url ? new URL(response.url) : current;
     if (!isSupportedMapsUrl(finalUrl)) {
+      await cancelBody(response);
       return null;
     }
 
-    let html = "";
-    try {
-      html = await response.text();
-    } catch (error) {
-      console.error("Google Maps page body failed:", errorName(error));
+    if (!response.ok) {
+      await cancelBody(response);
+      return { url: finalUrl, html: "", rateLimited: response.status === 429 };
     }
 
-    return { url: finalUrl, html };
+    if (parseCoordinates(finalUrl)) {
+      await cancelBody(response);
+      return { url: finalUrl, html: "" };
+    }
+
+    return { url: finalUrl, html: await readTextLimited(response, MAX_HTML_BYTES) };
   }
 
   return null;
 }
 
-async function loadPreview(html: string): Promise<PreviewData | null> {
+async function loadPreview(html: string, deadline: number): Promise<PreviewResult> {
   const match =
     /href="((?:https:\/\/www\.google\.com)?\/maps\/preview\/place\?[^\"]+)"/.exec(html);
   if (!match) {
-    console.error("Google Maps place data link not found");
-    return null;
+    return { data: null, rateLimited: false };
   }
 
   let url: URL;
   try {
     url = new URL(match[1].replaceAll("&amp;", "&"), "https://www.google.com");
   } catch {
-    return null;
+    return { data: null, rateLimited: false };
   }
 
   if (url.hostname !== "www.google.com" || !url.pathname.startsWith("/maps/preview/place")) {
-    return null;
+    return { data: null, rateLimited: false };
   }
 
-  const response = await fetch(url.toString(), {
-    headers: {
-      "user-agent": USER_AGENT,
-      "accept-language": "id-ID,id;q=0.9,en;q=0.8",
-      accept: "application/json,text/plain,*/*",
-    },
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  });
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), {
+      headers: {
+        "user-agent": USER_AGENT,
+        "accept-language": "id-ID,id;q=0.9,en;q=0.8",
+        accept: "application/json,text/plain,*/*",
+      },
+      signal: timeoutSignal(deadline),
+    });
+  } catch (error) {
+    logNetworkFailure("google_place_data", error, url.hostname);
+    return { data: null, rateLimited: false };
+  }
 
+  logResponse("google_place_data", url.hostname, response);
   if (!response.ok) {
-    return null;
+    await cancelBody(response);
+    return { data: null, rateLimited: response.status === 429 };
   }
 
-  return parseMapsPreview(await response.text());
+  return {
+    data: parseMapsPreview(await readTextLimited(response, MAX_PREVIEW_BYTES)),
+    rateLimited: false,
+  };
+}
+
+function timeoutSignal(deadline: number): AbortSignal {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) {
+    throw new Error("lookup timeout");
+  }
+  return AbortSignal.timeout(Math.min(8_000, remaining));
+}
+
+function logResponse(
+  stage: string,
+  hostname: string,
+  response: Response,
+  redirectHostname?: string,
+): void {
+  console.info(
+    "Maps outbound request",
+    JSON.stringify({
+      stage,
+      hostname,
+      status: response.status,
+      contentType: response.headers.get("content-type") ?? undefined,
+      redirectHostname,
+      retryAfter: response.headers.get("retry-after") ?? undefined,
+    }),
+  );
+}
+
+function logNetworkFailure(stage: string, error: unknown, hostname?: string): void {
+  console.error(
+    "Maps outbound request",
+    JSON.stringify({
+      stage,
+      hostname,
+      status: "network_error",
+      errorType: errorName(error),
+    }),
+  );
+}
+
+function hostnameOf(value: string): string | undefined {
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return undefined;
+  }
+}
+
+function locationHostnameOf(location: string | null, current: URL): string | undefined {
+  if (!location) {
+    return undefined;
+  }
+  try {
+    return new URL(location, current).hostname;
+  } catch {
+    return undefined;
+  }
+}
+
+async function cancelBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    return;
+  }
+}
+
+async function readTextLimited(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) {
+    return "";
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+
+  while (length < maxBytes) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    const chunk = value.subarray(0, maxBytes - length);
+    chunks.push(chunk);
+    length += chunk.length;
+    if (chunk.length < value.length || length >= maxBytes) {
+      await reader.cancel();
+      break;
+    }
+  }
+
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+function cleanOptionalText(value: string | undefined): string | undefined {
+  return value ? cleanText(value) : undefined;
 }
 
 function findAddress(data: unknown, name?: string): string | undefined {
