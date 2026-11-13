@@ -123,7 +123,7 @@ export async function resolveMapsLink(
     return resolvePlacesAddress(
       {
         name: trimOptionalText(name),
-        address: address ? address.replaceAll(",", "").trim() : undefined,
+        address: address ? cleanAddress(address) : undefined,
         coordinates,
       },
       placesApiKey,
@@ -210,7 +210,7 @@ async function resolvePlacesAddress(
   if (match?.address) {
     return {
       status: "ok",
-      result: { ...result, address: match.address.replaceAll(",", "").trim() },
+      result: { ...result, address: cleanAddress(match.address) },
     };
   }
 
@@ -231,6 +231,15 @@ function distanceMeters(a: Coordinates, b: Coordinates): number {
   return 6_371_000 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
 }
 
+/**
+ * Bersihkan alamat dari semua titik (.) dan koma (,).
+ * Tanda baca diganti spasi lalu spasi ganda dirapikan,
+ * jadi "Jl.Melati, Kec. A" -> "Jl Melati Kec A".
+ */
+export function cleanAddress(address: string): string {
+  return address.replace(/[.,]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
 export function formatMapsResult(result: MapsResult): string {
   const lines: string[] = [];
 
@@ -239,7 +248,7 @@ export function formatMapsResult(result: MapsResult): string {
   }
 
   if (result.address) {
-    lines.push(`Alamat: ${result.address.replaceAll(",", "").trim()}`);
+    lines.push(`Alamat: ${cleanAddress(result.address)}`);
   } else {
     lines.push("Alamat: Tidak tersedia");
   }

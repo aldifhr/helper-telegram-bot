@@ -50,10 +50,15 @@ describe("removeCommas", () => {
     expect(removeCommas("Jakarta, Bandung, Surabaya")).toBe("Jakarta Bandung Surabaya");
   });
 
-  it("preserves periods, spaces, and text around commas", () => {
+  it("removes periods and commas from an address", () => {
     expect(removeCommas("Jl. Sudirman No. 12, Cilacap, Jawa Tengah")).toBe(
-      "Jl. Sudirman No. 12 Cilacap Jawa Tengah",
+      "Jl Sudirman No 12 Cilacap Jawa Tengah",
     );
+    expect(removeCommas("Jl.Melati No.5, Kec. Wanareja.")).toBe("Jl Melati No 5 Kec Wanareja");
+  });
+
+  it("keeps decimal points in numbers", () => {
+    expect(removeCommas("-7.123456, 109.123456")).toBe("-7.123456 109.123456");
   });
 
   it("keeps emoji and non-ASCII characters untouched", () => {
@@ -68,8 +73,8 @@ describe("removeCommas", () => {
     expect(removeCommas(",,,")).toBe("");
   });
 
-  it("returns the original text when there are no commas", () => {
-    const text = "Tidak ada koma di sini. 100% aman!";
+  it("returns the original text when there are no commas or periods", () => {
+    const text = "Tidak ada koma atau titik di sini 100% aman!";
     expect(removeCommas(text)).toBe(text);
   });
 });

@@ -4,8 +4,8 @@ Bot Telegram ringan yang menghapus semua karakter koma ASCII (`,`) dari teks dan
 
 ## Fitur
 
-- Menghapus semua koma tanpa mengubah karakter lain. Titik desimal, tanda minus, spasi, emoji, dan huruf tetap dipertahankan.
-- Membaca link Google Maps dan membalas nama tempat, alamat tanpa koma, latitude, dan longitude.
+- Menghapus semua koma (,) dan titik (.). Titik desimal pada angka (mis. -7.123456), tanda minus, spasi, emoji, dan huruf tetap dipertahankan.
+- Membaca link Google Maps dan membalas nama tempat, alamat tanpa koma dan titik, latitude, dan longitude.
 - Perintah `/start`, `/help`, dan `/clean`.
 - Pesan teks biasa langsung diproses dan dibalas ke pesan asli.
 - Hasil dikirim sebagai teks biasa (tanpa Markdown/HTML) agar aman disalin.
@@ -29,7 +29,7 @@ Balasan:
 
 ```text
 Nama: Pondok Pesantren Al Anshor
-Alamat: Jl. Curug Bandung, Ciheuleut, Limbangan, Kec. Wanareja, Kabupaten Cilacap, Jawa Tengah 53232
+Alamat: Jl Curug Bandung Ciheuleut Limbangan Kec Wanareja Kabupaten Cilacap Jawa Tengah 53232
 Latitude: -7.2810178
 Longitude: 108.7039185
 ```

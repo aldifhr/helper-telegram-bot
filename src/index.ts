@@ -1,4 +1,4 @@
-﻿import { extractMapsUrl, formatMapsResult, resolveMapsLink } from "./maps";
+﻿import { cleanAddress, extractMapsUrl, formatMapsResult, resolveMapsLink } from "./maps";
 import { MAX_INPUT_LENGTH, parseCoordinatePair, removeCommas } from "./processor";
 import { sendMessage } from "./telegram";
 import type { MapsResult } from "./maps";
@@ -11,8 +11,8 @@ const START_TEXT = [
   "Halo! Saya bot pengolah teks dan lokasi.",
   "",
   "CARA PAKAI TEKS",
-  "Kirim teks biasa. Saya menghapus koma ASCII (,) dan membalas hasilnya agar mudah disalin.",
-  "Karakter lain seperti titik desimal, minus, spasi, huruf, dan emoji tetap dipertahankan.",
+  "Kirim teks biasa. Saya menghapus koma (,) dan titik (.) lalu membalas hasilnya agar mudah disalin.",
+  "Titik desimal pada angka (mis. -7.123456), minus, spasi, huruf, dan emoji tetap dipertahankan.",
   "",
   "KOORDINAT",
   "Koordinat desimal dengan koma juga dikenali:",
@@ -23,7 +23,7 @@ const START_TEXT = [
   "",
   "GOOGLE MAPS",
   "Kirim link tempat atau pin Google Maps. Bot akan membalas nama, alamat jika tersedia, dan koordinat.",
-  "Koma pada alamat Maps dihapus agar hasil mudah ditempel ke formulir yang menolak koma.",
+  "Koma dan titik pada alamat Maps dihapus agar hasil bersih dan mudah ditempel ke formulir.",
   "Tombol salin tersedia terpisah untuk nama, alamat, latitude, dan longitude.",
   "Alamat Places API memerlukan konfigurasi Google Places API; jika tidak tersedia, alamat bisa ditampilkan sebagai tidak tersedia.",
   "",
@@ -40,27 +40,27 @@ const START_TEXT = [
 const HELP_TEXT = [
   "Panduan penggunaan:",
   "",
-  "1. Kirim teks biasa untuk langsung menghapus semua koma.",
+  "1. Kirim teks biasa untuk langsung menghapus semua koma dan titik.",
   "2. Atau gunakan /clean diikuti teks:",
   "   /clean Jakarta, Bandung, Surabaya",
   "3. Jika hanya mengirim /clean, bot akan meminta teks.",
   "",
-  "Pada teks biasa, koma ASCII (,) dihapus.",
+  "Pada teks biasa, koma (,) dan titik (.) dihapus.",
   "Dalam pasangan koordinat valid, koma desimal diganti titik dan koma pemisah menjadi spasi.",
-  "Koma pada alamat dari Google Maps dihapus; koma desimal koordinat diubah menjadi titik.",
+  "Koma dan titik pada alamat dari Google Maps dihapus; koma desimal koordinat diubah menjadi titik.",
   "Tanda minus, titik desimal, spasi, emoji, dan karakter lain tetap dipertahankan.",
   "",
   "Link Google Maps:",
   "Kirim link tempat atau titik dari Google Maps, misalnya maps.app.goo.gl/...",
-  "Bot membalas nama tempat, alamat tanpa koma, latitude, dan longitude.",
+  "Bot membalas nama tempat, alamat tanpa koma dan titik, latitude, dan longitude.",
 ].join("\n");
 
 const CLEAN_PROMPT =
   "Kirim teks setelah /clean, atau kirim teks biasa yang ingin diproses.\nContoh: /clean Jakarta, Bandung";
 
 const EMPTY_TEXT = "Kirim teks yang ingin diproses.";
-const EMPTY_RESULT = "Tidak ada teks yang tersisa setelah tanda koma dihapus.";
-const NO_COMMAS = "Tidak ada tanda koma yang ditemukan. Teks tidak berubah.";
+const EMPTY_RESULT = "Tidak ada teks yang tersisa setelah koma dan titik dihapus.";
+const NO_COMMAS = "Tidak ada koma atau titik yang ditemukan. Teks tidak berubah.";
 const TOO_LONG = `Pesan terlalu panjang. Batas aman adalah ${MAX_INPUT_LENGTH} karakter.`;
 const MAPS_FAILED =
   "Link Google Maps tidak bisa diproses. Pastikan link mengarah ke tempat atau titik di Google Maps.";
@@ -213,7 +213,7 @@ function mapsCopyOptions(result: MapsResult): {
     buttons.push({ label: "Salin nama", text: result.name.replaceAll(",", "") });
   }
   if (result.address && result.address.length <= 256) {
-    buttons.push({ label: "Salin alamat", text: result.address.replaceAll(",", "") });
+    buttons.push({ label: "Salin alamat", text: cleanAddress(result.address) });
   }
   buttons.push(
     { label: "Salin latitude", text: String(result.coordinates.latitude) },

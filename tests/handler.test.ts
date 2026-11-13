@@ -156,7 +156,7 @@ describe("message handling", () => {
   it("handles /clean with inline text", async () => {
     const fetchMock = stubTelegramFetch();
     await sendUpdate(textUpdate("/clean Jl. Sudirman No. 12, Cilacap, Jawa Tengah"));
-    expect(sentPayload(fetchMock).text).toBe("Jl. Sudirman No. 12 Cilacap Jawa Tengah");
+    expect(sentPayload(fetchMock).text).toBe("Jl Sudirman No 12 Cilacap Jawa Tengah");
   });
 
   it("handles /clean with a bot mention", async () => {
@@ -187,7 +187,7 @@ describe("message handling", () => {
   it("informs the user when there are no commas", async () => {
     const fetchMock = stubTelegramFetch();
     await sendUpdate(textUpdate("Teks tanpa koma"));
-    expect(String(sentPayload(fetchMock).text)).toContain("Tidak ada tanda koma");
+    expect(String(sentPayload(fetchMock).text)).toContain("Tidak ada koma atau titik");
   });
 
   it("handles text that only contains commas", async () => {
@@ -332,7 +332,7 @@ describe("map link handling", () => {
     const text = telegramText(fetchMock);
     expect(text).toContain("Nama: Pondok Pesantren Al Anshor");
     expect(text).toContain(
-      "Alamat: Jl. Curug Bandung Ciheuleut Limbangan Kec. Wanareja Kabupaten Cilacap Jawa Tengah 53232",
+      "Alamat: Jl Curug Bandung Ciheuleut Limbangan Kec Wanareja Kabupaten Cilacap Jawa Tengah 53232",
     );
     expect(text).toContain("Latitude: -7.2810178");
     expect(text).toContain("Longitude: 108.7039185");
@@ -343,7 +343,7 @@ describe("map link handling", () => {
         {
           text: "Salin alamat",
           copy_text: {
-            text: "Jl. Curug Bandung Ciheuleut Limbangan Kec. Wanareja Kabupaten Cilacap Jawa Tengah 53232",
+            text: "Jl Curug Bandung Ciheuleut Limbangan Kec Wanareja Kabupaten Cilacap Jawa Tengah 53232",
           },
         },
         { text: "Salin latitude", copy_text: { text: "-7.2810178" } },
@@ -389,7 +389,7 @@ describe("map link handling", () => {
 
     expect(response.status).toBe(200);
     expect(telegramText(fetchMock)).toContain(
-      "Alamat: Jl. Srikaya Wanareja Timur Wanareja Kec. Wanareja Kabupaten Cilacap Jawa Tengah 53265 Indonesia",
+      "Alamat: Jl Srikaya Wanareja Timur Wanareja Kec Wanareja Kabupaten Cilacap Jawa Tengah 53265 Indonesia",
     );
     const placesCall = fetchMock.mock.calls.find(([input]) =>
       String(input).includes("places.googleapis.com"),

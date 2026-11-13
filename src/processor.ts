@@ -35,7 +35,20 @@ export function removeCommas(text: string): string {
     }
   }
 
-  return text.replaceAll(",", "");
+  return removeNonDecimalPeriods(text.replaceAll(",", ""));
+}
+
+/**
+ * Hapus titik (.) yang bukan titik desimal. Titik di antara dua angka
+ * (mis. -7.123456) tetap dipertahankan, titik lain dihapus:
+ * "Jl. Sudirman No.12" -> "Jl Sudirman No 12".
+ */
+export function removeNonDecimalPeriods(text: string): string {
+  return text
+    .replace(/(?:(?<!\d)\.|\.(?!\d))+/g, " ")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/^[ \t]+/gm, (m, offset: number) => (offset === 0 ? "" : m));
 }
 
 function normalizeCommaDecimalPair(text: string): string | undefined {

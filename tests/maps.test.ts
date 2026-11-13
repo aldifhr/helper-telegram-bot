@@ -14,7 +14,7 @@ const FINAL_URL =
 const ADDRESS =
   "Jl. Curug Bandung, Ciheuleut, Limbangan, Kec. Wanareja, Kabupaten Cilacap, Jawa Tengah 53232";
 const CLEAN_ADDRESS =
-  "Jl. Curug Bandung Ciheuleut Limbangan Kec. Wanareja Kabupaten Cilacap Jawa Tengah 53232";
+  "Jl Curug Bandung Ciheuleut Limbangan Kec Wanareja Kabupaten Cilacap Jawa Tengah 53232";
 function previewPayload(): string {
   const root: unknown[] = [];
   root[9] = [null, null, -7.2810178, 108.7039185];
@@ -370,7 +370,7 @@ describe("resolveMapsLink", () => {
 
     expect(resolution.status).toBe("ok");
     if (resolution.status === "ok") {
-      expect(resolution.result.address).toBe("Jl. Sekolah Wanareja Kabupaten Cilacap Jawa Tengah 53265");
+      expect(resolution.result.address).toBe("Jl Sekolah Wanareja Kabupaten Cilacap Jawa Tengah 53265");
       expect(resolution.result.address).not.toBe(ADDRESS);
     }
     expect(fetchMock).toHaveBeenCalledTimes(4);
