@@ -20,6 +20,20 @@ export function parseCoordinatePair(text: string): CoordinatePair | undefined {
   return { latitude: match[1], longitude: match[2] };
 }
 
+/**
+ * Hapus angka 0 di depan nomor HP Indonesia yang dikirim sebagai satu
+ * nomor utuh. Spasi atau tanda hubung di antara angka juga dibuang:
+ * "0822-1871-8161" -> "82218718161".
+ */
+export function removeLeadingZeroFromPhoneNumber(text: string): string | undefined {
+  const match = /^\s*(08(?:[ -]?\d){8,12})\s*$/.exec(text);
+  if (!match) {
+    return undefined;
+  }
+
+  return match[1].replace(/\D/g, "").slice(1);
+}
+
 export function removeCommas(text: string): string {
   const fullPair = normalizeCommaDecimalPair(text);
   if (fullPair !== undefined) {

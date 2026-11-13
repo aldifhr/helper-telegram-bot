@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseCoordinatePair, removeCommas } from "../src/processor";
+import {
+  parseCoordinatePair,
+  removeCommas,
+  removeLeadingZeroFromPhoneNumber,
+} from "../src/processor";
 
 describe("parseCoordinatePair", () => {
   it("extracts latitude and longitude strings separately", () => {
@@ -12,6 +16,22 @@ describe("parseCoordinatePair", () => {
   it("rejects text that is not a valid coordinate pair", () => {
     expect(parseCoordinatePair("Jakarta Bandung")).toBeUndefined();
     expect(parseCoordinatePair("91 108")).toBeUndefined();
+  });
+});
+
+describe("removeLeadingZeroFromPhoneNumber", () => {
+  it("removes the leading zero from a standalone Indonesian phone number", () => {
+    expect(removeLeadingZeroFromPhoneNumber("082218718161")).toBe("82218718161");
+  });
+
+  it("removes spaces and hyphens between digits", () => {
+    expect(removeLeadingZeroFromPhoneNumber("0822-1871 8161")).toBe("82218718161");
+  });
+
+  it("ignores text that is not a standalone Indonesian phone number", () => {
+    expect(removeLeadingZeroFromPhoneNumber("Nomor saya 082218718161")).toBeUndefined();
+    expect(removeLeadingZeroFromPhoneNumber("62218718161")).toBeUndefined();
+    expect(removeLeadingZeroFromPhoneNumber("08123")).toBeUndefined();
   });
 });
 

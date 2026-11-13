@@ -153,6 +153,26 @@ describe("message handling", () => {
     });
   });
 
+  it("removes the leading zero from an Indonesian phone number", async () => {
+    const fetchMock = stubTelegramFetch();
+
+    const response = await sendUpdate(textUpdate("082218718161"));
+
+    expect(response.status).toBe(200);
+    expect(sentPayload(fetchMock)).toMatchObject({
+      text: "82218718161",
+      reply_markup: {
+        inline_keyboard: [[{ text: "Salin nomor", copy_text: { text: "82218718161" } }]],
+      },
+    });
+  });
+
+  it("removes the leading zero from a phone number sent with /clean", async () => {
+    const fetchMock = stubTelegramFetch();
+    await sendUpdate(textUpdate("/clean 0822-1871 8161"));
+    expect(sentPayload(fetchMock).text).toBe("82218718161");
+  });
+
   it("handles /clean with inline text", async () => {
     const fetchMock = stubTelegramFetch();
     await sendUpdate(textUpdate("/clean Jl. Sudirman No. 12, Cilacap, Jawa Tengah"));
@@ -176,12 +196,14 @@ describe("message handling", () => {
     await sendUpdate(textUpdate("/start"));
     expect(String(sentPayload(startFetch).text)).toContain("CARA PAKAI TEKS");
     expect(String(sentPayload(startFetch).text)).toContain("-7,3449461, 108,7079663");
+    expect(String(sentPayload(startFetch).text)).toContain("082218718161");
     expect(String(sentPayload(startFetch).text)).toContain("GOOGLE MAPS");
     vi.unstubAllGlobals();
 
     const helpFetch = stubTelegramFetch();
     await sendUpdate(textUpdate("/help"));
     expect(String(sentPayload(helpFetch).text)).toContain("Panduan penggunaan");
+    expect(String(sentPayload(helpFetch).text)).toContain("82218718161");
   });
 
   it("informs the user when there are no commas", async () => {

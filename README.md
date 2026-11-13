@@ -6,6 +6,7 @@ Bot Telegram ringan yang menghapus semua karakter koma ASCII (`,`) dari teks dan
 
 - Menghapus semua koma (,) dan titik (.). Titik desimal pada angka (mis. -7.123456), tanda minus, spasi, emoji, dan huruf tetap dipertahankan.
 - Membaca link Google Maps dan membalas nama tempat, alamat tanpa koma dan titik, latitude, dan longitude.
+- Menghapus angka 0 di depan nomor HP Indonesia yang dikirim sebagai satu nomor utuh, misalnya `082218718161` menjadi `82218718161`. Spasi atau tanda hubung di antara angka juga dibuang.
 - Perintah `/start`, `/help`, dan `/clean`.
 - Pesan teks biasa langsung diproses dan dibalas ke pesan asli.
 - Hasil dikirim sebagai teks biasa (tanpa Markdown/HTML) agar aman disalin.
@@ -17,6 +18,7 @@ Contoh:
 ```text
 -7.123456, 109.123456        ->  -7.123456 109.123456
 Jakarta, Bandung, Surabaya   ->  Jakarta Bandung Surabaya
+082218718161                 ->  82218718161
 ```
 
 Contoh link Google Maps:
@@ -165,6 +167,7 @@ Pastikan:
 2. Kirim `Jakarta, Bandung, Surabaya`; bot harus membalas `Jakarta Bandung Surabaya`.
 3. Kirim `/clean -7.123456, 109.123456`; bot harus membalas `-7.123456 109.123456`.
 4. Kirim `/clean` saja; bot harus meminta teks.
+5. Kirim `082218718161`; bot harus membalas `82218718161`.
 
 ### 9. Perbarui kode dan redeploy
 
@@ -231,6 +234,7 @@ Catatan penting:
 - Koma desimal hanya diubah menjadi titik pada pasangan koordinat valid, misalnya `-7,3449461, 108,7079663` menjadi `-7.3449461 108.7079663`. Koma pemisah koordinat menjadi spasi.
 - Koma biasa pada teks dan nama/alamat Maps dihapus. Koma desimal hanya diubah menjadi titik dalam pasangan koordinat valid.
 - Jika pesan berisi link Google Maps, fitur Maps diproses dan teks lain dalam pesan yang sama diabaikan.
+- Jika pesan hanya berisi nomor HP Indonesia diawali `08`, angka 0 pertama dihapus dan spasi/tanda hubung antarangka dibuang. Nomor yang menjadi bagian dari kalimat tidak diubah oleh fitur ini.
 - Jika teks tidak memiliki koma, bot membalas bahwa tidak ada koma dan teks tidak berubah.
 - Jika hasil kosong (misalnya hanya koma), bot memberi tahu bahwa tidak ada teks tersisa.
 - Perintah yang tidak dikenal diabaikan.

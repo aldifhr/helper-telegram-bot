@@ -1,5 +1,10 @@
 ﻿import { cleanAddress, extractMapsUrl, formatMapsResult, resolveMapsLink } from "./maps";
-import { MAX_INPUT_LENGTH, parseCoordinatePair, removeCommas } from "./processor";
+import {
+  MAX_INPUT_LENGTH,
+  parseCoordinatePair,
+  removeCommas,
+  removeLeadingZeroFromPhoneNumber,
+} from "./processor";
 import { sendMessage } from "./telegram";
 import type { MapsResult } from "./maps";
 import type { Env, TelegramMessage, TelegramUpdate } from "./types";
@@ -13,6 +18,10 @@ const START_TEXT = [
   "CARA PAKAI TEKS",
   "Kirim teks biasa. Saya menghapus koma (,) dan titik (.) lalu membalas hasilnya agar mudah disalin.",
   "Titik desimal pada angka (mis. -7.123456), minus, spasi, huruf, dan emoji tetap dipertahankan.",
+  "",
+  "NOMOR HP",
+  "Kirim nomor HP Indonesia yang diawali 0, misalnya 082218718161.",
+  "Bot membalas 82218718161 tanpa angka 0 di depan. Spasi atau tanda hubung di antara angka juga dibuang.",
   "",
   "KOORDINAT",
   "Koordinat desimal dengan koma juga dikenali:",
@@ -44,6 +53,7 @@ const HELP_TEXT = [
   "2. Atau gunakan /clean diikuti teks:",
   "   /clean Jakarta, Bandung, Surabaya",
   "3. Jika hanya mengirim /clean, bot akan meminta teks.",
+  "4. Kirim nomor HP Indonesia yang diawali 0, misalnya 082218718161, untuk menghapus angka 0 di depannya menjadi 82218718161.",
   "",
   "Pada teks biasa, koma (,) dan titik (.) dihapus.",
   "Dalam pasangan koordinat valid, koma desimal diganti titik dan koma pemisah menjadi spasi.",
@@ -227,6 +237,11 @@ async function processAndRespond(
   message: TelegramMessage,
   text: string,
 ): Promise<Response> {
+  const phoneNumber = removeLeadingZeroFromPhoneNumber(text);
+  if (phoneNumber !== undefined) {
+    return replyAndRespond(env, message, phoneNumber, phoneNumber, "Salin nomor");
+  }
+
   const result = removeCommas(text);
 
   if (result === "") {
